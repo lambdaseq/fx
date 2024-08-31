@@ -176,3 +176,34 @@
                    (inc-twice>)
                    (-eval!))]
       (is (= 3 res)))))
+
+(deftest cond-test
+  (testing "Runs the first effect that satisfies the condition"
+    (let [eff (->>
+                (succeed> 1)
+                (cond>
+                  odd? (comp succeed> inc)
+                  even? (comp succeed> dec)))]
+      (is (= 2 (-eval! eff))))
+    (let [eff (->>
+                (succeed> 2)
+                (cond>
+                  odd? (comp succeed> inc)
+                  even? (comp succeed> dec)))]
+      (is (= 1 (-eval! eff))))
+    (let [eff (->>
+                (succeed> 1)
+                (cond>
+                  ; Always false
+                  (comp not any?) (constantly (succeed> 1))
+                  ; Always false
+                  (comp not any?) (constantly (succeed> 2))
+                  any? (constantly (succeed> 3))))]
+      (is (= 3 (-eval! eff))))
+    (let [eff (->>
+                (succeed> 42)
+                (cond>
+                  (comp not any?) (constantly (succeed> 1))
+                  (comp not any?) (constantly (succeed> 2))
+                  (comp not any?) (constantly (succeed> 3))))]
+      (is (failure? (-eval! eff))))))

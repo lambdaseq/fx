@@ -50,7 +50,8 @@
    (make-effect :fail (constantly (make-failure type error)))))
 
 (defn map>
-  "Maps over the effect. Takes a function f and/or an effect, and returns a new effect."
+  "Maps over the effect. Takes a function f and/or an effect,
+   and returns a new effect."
   [f effect]
   (make-effect :map
     (constantly
@@ -59,7 +60,8 @@
           (f res#))))))
 
 (defn mapcat>
-  "Flat maps over the effect. Takes a function f that returns an effect and/or an effect, and returns a new effect."
+  "Flat maps over the effect. Takes a function f that returns an effect and/or an effect,
+   and returns a new effect."
   [f effect]
   (make-effect :mapcat
     (constantly
@@ -84,6 +86,30 @@
             (if (cond res)
               (then> res)
               (else> res))))))))
+
+(defn cond>
+  "Evaluates the conditions in order until one of them returns true,
+   then returns the effect associated with that condition.
+   Conditions are test and expr pairs. tests are functions that take the result of the previous effect,
+   and exprs are functions that take the result of the previous effect and return effects.
+
+   If no conditions are met, then returns a failure."
+  [& conditions]
+  (make-effect :cond
+    (constantly
+      (let [effect (last conditions)
+            conditions (->> conditions
+                            (butlast)
+                            (partition 2))]
+        (let [res (-eval! effect)]
+          (maybe-propagate-failure res
+            (-eval!
+              (loop [conditions conditions]
+                (if-let [[test expr>] (first conditions)]
+                  (if (test res)
+                    (expr> res)
+                    (recur (rest conditions)))
+                  (fail> :cond :no-conditions))))))))))
 
 (defmacro pipeline>>
   "Creates a pipeline of effects."
