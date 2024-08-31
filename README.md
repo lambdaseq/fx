@@ -1,10 +1,12 @@
 # com.lambdaseq/fx
 
 A Clojure library that implements a functional effect system, akin to Effect.ts, Scala's ZIO, or Haskell's IO monad.
-Using Clojure's elegant syntax and macros provides a simple and powerful way to model side effects in a pure functional way.
+Using Clojure's elegant syntax and macros provides a simple and powerful way to model side effects in a pure functional
+way.
 For example composing effects can be simply done using the `->>` macro.
 
 ## Usage
+
 Functions in `fx` that return effects are suffixed with `>`, and functions that evaluate effects are suffixed with `!`.
 You can `require` the core namespace and use the following functions:
 
@@ -30,6 +32,7 @@ You can `require` the core namespace and use the following functions:
 
 ;; => #com.lambdaseq.fx.core.Failure {:data {}, :type :error}
 ```
+
 An elegant way to do conditionals is also provided by the following functions:
 
 ```clojure
@@ -50,6 +53,7 @@ You can also declare reusable effects using the `pipeline>>` macro:
     (fx/map> inc)
     (fx/map> inc)))
 ```
+
 which is the same as writing:
 
 ```clojure
@@ -59,9 +63,20 @@ which is the same as writing:
        (fx/map> inc)))
 ```
 
+## Future Goals
+
+We intend to add the following features in the future:
+
+- [ ] Different runtimes and run strategies (similar to Effect.ts or ZIO's `Runtime`).
+- [ ] Build a suite of concurrency and parallelism primitives on top of `fx`.
+- [ ] Build helpers for common Clojure libraries that use side
+  effects ([ring](https://github.com/ring-clojure/ring)/[pedestal](https://github.com/pedestal/pedestal), [next.jdbc](https://github.com/seancorfield/next-jdbc),
+  etc), and extend them potentially into a full webstack.
+- [ ] Build a suite of monitoring and tracing tools using `fx` primitives.
+- [ ] Integrate with [typedclojure](https://typedclojure.org/), for a complete type safe effect system.
 
 ## License
 
-Copyright © 2024 lambdaseq.com
+Copyright © 2024 [LambdaSeq Works LTD.](lambdaseq.com),
 
 Distributed under the Eclipse Public License version 1.0.
