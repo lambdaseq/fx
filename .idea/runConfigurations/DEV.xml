@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="DEV" type="ClojureREPL" factoryName="Local" activateToolWindowBeforeRun="false" singleton="true">
+    <option name="configVersion" value="1" />
+    <option name="displayName" value="DEV" />
+    <option name="execution" value="DEPS" />
+    <module name="fx" />
+    <option name="options" value="-A:dev:test" />
+    <option name="profiles" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <method v="2" />
+  </configuration>
+</component>
