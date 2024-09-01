@@ -1,12 +1,15 @@
 (ns com.lambdaseq.fx.core)
 
 (defprotocol IEffect
-  (-eval! [this]
-    "Evaluates the effect and returns the result."))
+  (-next-effect [this]
+    "Returns the next effect in the chain.")
+  (-eval! [this v]
+    "Evaluates the run function of the effect and returns the result."))
 
-(defrecord Effect [effect-type run]
+(defrecord Effect [effect-type next-effect run]
   IEffect
-  (-eval! [_] (run)))
+  (-next-effect [_] next-effect)
+  (-eval! [_ v] (run v)))
 
 (defprotocol IFailure)
 
@@ -24,68 +27,78 @@
   [x]
   (instance? Failure x))
 
-(defn make-effect [type run]
-  (Effect. type run))
+(defn make-effect [type next-effect run]
+  (Effect. type next-effect run))
 
 (defn make-failure [type err]
   (Failure. type err))
 
 (defmacro maybe-propagate-failure
-  "If the value is an effect, then returns it, otherwise evaluates the body."
+  "If the value is an effect, then returns it, otherwise evaluates the body.
+  Useful for propagating failures in effects that handle only values."
   [v & body]
   `(if (failure? ~v)
      ~v
      (do ~@body)))
 
+(defmacro maybe-propagate-effect
+  "If the value is an effect, then returns it, otherwise evaluates the body.
+  Useful for propagating effects, in effects that handle only failures."
+  [v & body]
+  `(if (effect? ~v)
+     ~v
+     (do ~@body)))
+
 (defn succeed> [value]
   "Creates a successful effect that just returns the value."
-  (make-effect :succeed (constantly value)))
+  (make-effect :succeed nil (constantly value)))
 
 (defn fail>
   "Creates a failed effect. Takes a failure or a type and an error to be wrapped in a failure,
    and returns a new effect."
   ([failure]
-   (make-effect :fail (constantly failure)))
+   (make-effect :fail nil (constantly failure)))
   ([type error]
-   (make-effect :fail (constantly (make-failure type error)))))
+   (make-effect :fail nil (constantly (make-failure type error)))))
 
 (defn map>
   "Maps over the effect. Takes a function f and/or an effect,
    and returns a new effect."
-  [f effect]
+  [f next-effect]
   (make-effect :map
-    (constantly
-      (let [res# (-eval! effect)]
-        (maybe-propagate-failure res#
-          (f res#))))))
+    next-effect
+    (fn [v]
+      (maybe-propagate-failure v
+        (f v)))))
 
 (defn mapcat>
   "Flat maps over the effect. Takes a function f that returns an effect and/or an effect,
    and returns a new effect."
-  [f effect]
+  [f next-effect]
   (make-effect :mapcat
-    (constantly
-      (let [res# (-eval! effect)]
-        (maybe-propagate-failure res#
-          (let [ret# (f res#)]
-            (if (effect? ret#)
-              (-eval! ret#)
-              (make-failure :mapcat>-result-not-an-effect
-                {:result ret#}))))))))
+    next-effect
+    (fn [v]
+      (maybe-propagate-failure v
+        (let [res (f v)]
+          (if (effect? res)
+            ; Maybe should eval with nil here?
+            (-eval! res v)
+            (make-failure :mapcat>-result-not-an-effect
+                          {:result res})))))))
 
 (defn if>
   "If the condition is true,
      then returns the `then` effect,
      otherwise returns the `else` effect."
-  [cond then> else> effect]
+  [cond then> else> next-effect]
   (make-effect :if
-    (constantly
-      (let [res (-eval! effect)]
-        (maybe-propagate-failure res
-          (-eval!
-            (if (cond res)
-              (then> res)
-              (else> res))))))))
+    next-effect
+    (fn [v]
+      (maybe-propagate-failure v
+        (-eval! (if (cond v)
+                  (then> v)
+                  (else> v))
+                v)))))
 
 (defn cond>
   "Evaluates the conditions in order until one of them returns true,
@@ -95,21 +108,21 @@
 
    If no conditions are met, then returns a failure."
   [& conditions]
-  (make-effect :cond
-    (constantly
-      (let [effect (last conditions)
-            conditions (->> conditions
-                            (butlast)
-                            (partition 2))]
-        (let [res (-eval! effect)]
-          (maybe-propagate-failure res
-            (-eval!
-              (loop [conditions conditions]
-                (if-let [[test expr>] (first conditions)]
-                  (if (test res)
-                    (expr> res)
-                    (recur (rest conditions)))
-                  (fail> :cond :no-conditions))))))))))
+  (let [effect (last conditions)
+        conditions (->> conditions
+                        (butlast)
+                        (partition 2))]
+    (make-effect :cond
+      effect
+      (fn [v]
+        (maybe-propagate-failure v
+          (-eval! (loop [conditions conditions]
+                    (if-let [[test expr>] (first conditions)]
+                      (if (test v)
+                        (expr> v)
+                        (recur (rest conditions)))
+                      (fail> :cond :no-conditions)))
+                  v))))))
 
 (defmacro pipeline>>
   "Creates a pipeline of effects."
@@ -117,3 +130,11 @@
   `(fn [effect#]
      (->> effect#
           ~@body)))
+
+; Todo: convert this to tail recursion
+(defn run-sync!
+  "Evaluates the effect and returns the result."
+  [effect]
+  (if-let [next-effect (-next-effect effect)]
+    (-eval! effect (run-sync! next-effect))
+    (-eval! effect nil)))
