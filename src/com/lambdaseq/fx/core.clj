@@ -131,10 +131,13 @@
      (->> effect#
           ~@body)))
 
-; Todo: convert this to tail recursion
 (defn run-sync!
   "Evaluates the effect and returns the result."
   [effect]
-  (if-let [next-effect (-next-effect effect)]
-    (-eval! effect (run-sync! next-effect))
-    (-eval! effect nil)))
+  (->> effect
+       (iterate -next-effect)
+       (take-while some?)
+       (reverse)
+       (reduce (fn [acc effect]
+                 (-eval! effect acc))
+               nil)))
