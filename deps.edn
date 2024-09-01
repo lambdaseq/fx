@@ -1,6 +1,7 @@
-{:deps {fx/core {:local/root "./modules/fx-core"}}
- :aliases
- {:build {:deps       {io.github.clojure/tools.build
+{:aliases
+ {:dev   {:extra-deps {fx/core {:local/root "./modules/fx-core"}}}
+  :test  {:extra-paths ["./modules/fx-core/test"]}
+  :build {:deps       {io.github.clojure/tools.build
                        {:git/tag "v0.9.2" :git/sha "fe6b140"}
                        slipset/deps-deploy {:mvn/version "0.2.0"}}
           :ns-default build}}}
