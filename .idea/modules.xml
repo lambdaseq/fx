@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/fx.iml" filepath="$PROJECT_DIR$/fx.iml" />
+      <module fileurl="file://$PROJECT_DIR$/modules/fx-core/fx-core.iml" filepath="$PROJECT_DIR$/modules/fx-core/fx-core.iml" />
     </modules>
   </component>
 </project>
