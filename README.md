@@ -19,7 +19,7 @@ You can `require` the core namespace and use the following functions:
      (fx/map> inc)
      ; maps the value of the previous effect, but returns a new effect.
      (fx/mapcat> (fn [x] (fx/succeed> (* x 2))))
-     (eval!))
+     (run-sync!))
 ;; => 86
 ```
 
@@ -28,7 +28,7 @@ You can `require` the core namespace and use the following functions:
 ```clojure
 (->> (fx/fail! :error {})
      (fx/map> (fn [_] (println "This does not print" 42)))
-     (eval!))
+     (run-sync!))
 
 ;; => #com.lambdaseq.fx.core.Failure {:data {}, :type :error}
 ```
