@@ -126,28 +126,28 @@
   (testing "if> propagates failure"
     (let [res (->> (fail> :test {})
                    (if> true
-                     (constantly (succeed> 1))
-                     (constantly (succeed> 2)))
+                        (constantly (succeed> 1))
+                        (constantly (succeed> 2)))
                    (run-sync!))]
       (is (failure? res))))
 
   (testing "if> runs the then branch if condition is true"
     (let [eff (->> (succeed> true)
                    (if> true?
-                     (constantly (succeed> 1))
-                     (constantly (succeed> 2))))
+                        (constantly (succeed> 1))
+                        (constantly (succeed> 2))))
           res (run-sync! eff)]
       (is (= 1 res))))
 
   (testing "side effects in the `else` branch are not evaluated if condition is true"
     (let [res (->> (succeed> false)
                    (if> true?
-                     (fn [_]
-                       (print "Should not print")
-                       (succeed> 1))
-                     (fn [_]
-                       (print "Should print")
-                       (succeed> 2)))
+                        (fn [_]
+                          (print "Should not print")
+                          (succeed> 1))
+                        (fn [_]
+                          (print "Should print")
+                          (succeed> 2)))
                    (run-sync!)
                    (with-out-str))]
       (is (= "Should print" res))))
@@ -155,23 +155,23 @@
   (testing "if> runs the else branch if condition is true"
     (let [eff (->> (succeed> false)
                    (if> true?
-                     (fn [_]
-                       (print "Should not print")
-                       (succeed> 1))
-                     (fn [_]
-                       (print "Should print")
-                       (succeed> 2))))
+                        (fn [_]
+                          (print "Should not print")
+                          (succeed> 1))
+                        (fn [_]
+                          (print "Should print")
+                          (succeed> 2))))
           res (run-sync! eff)]
       (is (= 2 res))))
   (testing "side effects in the `then` branch are not evaluated if condition is false"
     (let [res (->> (succeed> false)
                    (if> true?
-                     (fn [_]
-                       (print "Should not print")
-                       (succeed> 1))
-                     (fn [_]
-                       (print "Should print")
-                       (succeed> 2)))
+                        (fn [_]
+                          (print "Should not print")
+                          (succeed> 1))
+                        (fn [_]
+                          (print "Should print")
+                          (succeed> 2)))
                    (run-sync!)
                    (with-out-str))]
       (is (= "Should print" res)))))
@@ -217,3 +217,119 @@
                   (comp not any?) (constantly (succeed> 2))
                   (comp not any?) (constantly (succeed> 3))))]
       (is (failure? (run-sync! eff))))))
+
+(deftest do>-test
+  (testing "do> propagates failure"
+    (let [res (->> (fail> :test {})
+                   (do> (constantly (succeed> 1)))
+                   (run-sync!))]
+      (is (failure? res))))
+  (testing "do> runs the side effect"
+    (let [res (->> (succeed> 1)
+                   (do> (fn [_] (print "Should print")))
+                   (run-sync!)
+                   (with-out-str))]
+      (is (= "Should print" res))))
+  (testing "do> does not affect the value"
+    (let [res (->> (succeed> 1)
+                   (do> (fn [_] (print "Should print")))
+                   (run-sync!))]
+      (is (= 1 res)))))
+
+(deftest all>-test
+  (testing "all> returns a vector of the results of the effects"
+    (let [res (->> (all> [(succeed> 1)
+                          (succeed> 2)])
+                   (run-sync!))]
+      (is (= [1 2] res))))
+  (testing "all> runs all side effects"
+    (let [res (->> (all> [(->> (succeed> 1)
+                               (do> (fn [_] (print "Should print 1"))))
+                          (->> (succeed> 2)
+                               (do> (fn [_] (print "Should print 2"))))])
+                   (run-sync!)
+                   (with-out-str))]
+      (is (= "Should print 1Should print 2" res)))))
+
+
+(deftest catch-all>-test
+  (testing "catch-all> catches all exceptions"
+    (let [res (->> (fail> :test {})
+                   (catch-all> (constantly (succeed> 1)))
+                   (run-sync!))]
+      (is (= 1 res)))
+    (let [res (->> (fail> :test {})
+                   (catch-all> (constantly (fail> :test {})))
+                   (run-sync!))]
+      (is (failure? res))))
+  (testing "catch-all> runs the side effect"
+    (let [res (->> (fail> :test {})
+                   (catch-all> (fn [_]
+                                 (print "Should print")
+                                 (succeed> 1)))
+                   (run-sync!)
+                   (with-out-str))]
+      (is (= "Should print" res))))
+  (testing "catch-all> propagates the value if not a failure"
+    (let [res (->> (succeed> 1)
+                   (catch-all> (constantly (succeed> 2)))
+                   (run-sync!))]
+      (is (= 1 res))))
+  (testing "catch-all> body does not evaluate if not a failure"
+    (let [res (->> (succeed> 1)
+                   (catch-all> (fn [_]
+                                 (print "Should not print")
+                                 (succeed> 2)))
+                   (run-sync!)
+                   (with-out-str))]
+      (is (not= "Should not print" res))))
+  (testing "catch-all> body is a function that takes the failure"
+    (let [res (->> (fail> :test {:num 1})
+                   (catch-all> (fn [{:keys [type]
+                                     {:keys [num]} :data}]
+                                 (case type
+                                   :test (succeed> num)
+                                   (fail> :test {}))))
+                   (run-sync!))]
+      (is (= 1 res)))))
+
+(deftest catch>-test
+  (testing "catch> catches specific exceptions"
+    (let [res (->> (fail> :test {})
+                   (catch> {:test (constantly (succeed> 1))})
+                   (run-sync!))]
+      (is (= 1 res)))
+    (let [res (->> (fail> :test {})
+                   (catch> {:test (constantly (fail> :other {}))})
+                   (run-sync!))]
+      (is (= (make-failure :other {}) res))))
+  (testing "catch> runs the side effect"
+    (let [res (->> (fail> :test {})
+                   (catch> {:test (fn [_]
+                                    (print "Should print")
+                                    (succeed> 1))})
+                   (run-sync!)
+                   (with-out-str))]
+      (is (= "Should print" res))))
+  (testing "catch> propagates the value if not a failure"
+    (let [res (->> (succeed> 1)
+                   (catch> {:test (constantly (succeed> 2))})
+                   (run-sync!))]
+      (is (= 1 res))))
+  (testing "catch> body does not evaluate if not a failure"
+    (let [res (->> (succeed> 1)
+                   (catch> {:test (fn [_]
+                                    (print "Should not print")
+                                    (succeed> 2))})
+                   (run-sync!)
+                   (with-out-str))]
+      (is (not= "Should not print" res))))
+  (testing "catch> propagates the failure if not caught"
+    (let [res (->> (fail> :test {})
+                   (catch> {:other (constantly (succeed> 1))})
+                   (run-sync!))]
+      (is (= (make-failure :test {}) res)))
+    (let [res (->> (fail> :test {})
+                   (catch> {:other (constantly (fail> :test {}))})
+                   (run-sync!))]
+      (is (= (make-failure :test {}) res)))))

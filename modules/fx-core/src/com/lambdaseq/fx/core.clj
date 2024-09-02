@@ -67,9 +67,30 @@
   [f next-effect]
   (make-effect :map
     next-effect
-    (fn [v]
-      (maybe-propagate-failure v
-        (f v)))))
+    (fn [value]
+      (maybe-propagate-failure value
+        (f value)))))
+
+(defn do>
+  "Runs the effect and propagates the value to the next effect."
+  [f next-effect]
+  (make-effect :do
+    next-effect
+    (fn [value]
+      (maybe-propagate-failure value
+        (do
+          (f value)
+          value)))))
+
+(defn all>
+  "Combines the effects into a single effect that returns a vector of the results of the effects."
+  [effects]
+  (make-effect
+    :all
+    nil
+    (constantly
+      (->> effects
+           (mapv (fn [eff] (-eval! eff nil)))))))
 
 (defn mapcat>
   "Flat maps over the effect. Takes a function f that returns an effect and/or an effect,
@@ -77,12 +98,12 @@
   [f next-effect]
   (make-effect :mapcat
     next-effect
-    (fn [v]
-      (maybe-propagate-failure v
-        (let [res (f v)]
+    (fn [value]
+      (maybe-propagate-failure value
+        (let [res (f value)]
           (if (effect? res)
             ; Maybe should eval with nil here?
-            (-eval! res v)
+            (-eval! res value)
             (make-failure :mapcat>-result-not-an-effect
                           {:result res})))))))
 
@@ -93,12 +114,12 @@
   [cond then> else> next-effect]
   (make-effect :if
     next-effect
-    (fn [v]
-      (maybe-propagate-failure v
-        (-eval! (if (cond v)
-                  (then> v)
-                  (else> v))
-                v)))))
+    (fn [value]
+      (maybe-propagate-failure value
+        (-eval! (if (cond value)
+                  (then> value)
+                  (else> value))
+                value)))))
 
 (defn cond>
   "Evaluates the conditions in order until one of them returns true,
@@ -123,6 +144,33 @@
                         (recur (rest conditions)))
                       (fail> :cond :no-conditions)))
                   v))))))
+
+(defn catch>
+  "Dispatches the failure to the provided handler based on the failure type.
+   The functions should receive the failure `data` and return an effect."
+  [f-map next-effect]
+  (make-effect :catch
+    next-effect
+    (fn [value]
+      (if (failure? value)
+        (let [{:keys [type data]} value
+              f (get f-map type)]
+          (if f
+            ; maybe it should be (f value)
+            (-eval! (f data) value)
+            value))
+        value))))
+
+(defn catch-all>
+  "Catches all failures and runs the provided function.
+  The function should receive the failure and return an effect."
+  [f next-effect]
+  (make-effect :catch-all
+    next-effect
+    (fn [value]
+      (if (failure? value)
+        (-eval! (f value) value)
+        value))))
 
 (defmacro pipeline>>
   "Creates a pipeline of effects."
