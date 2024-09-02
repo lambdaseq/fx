@@ -63,6 +63,28 @@ which is the same as writing:
        (fx/map> inc)))
 ```
 
+### Handling Errors
+
+You can handle errors using the `fx/catch>` function:
+
+```clojure
+(->> (fx/fail! :error {:value 42})
+     (fx/catch>
+       {:error (fn [{:keys [value]}] (fx/succeed> value))})
+     (run-sync!))
+;; => "error"
+```
+
+or catch all errors using the `fx/catch-all>` function:
+
+```clojure
+(->> (fx/fail! :error {:value 42})
+     (fx/catch-all>
+       (fn [e] (fx/succeed> (str "Caught error: " e))))
+     (run-sync!))
+;; => "Caught error: #com.lambdaseq.fx.core.Failure {:data {:value 42}, :type :error}"
+```
+
 ## Future Goals
 
 We intend to add the following features in the future:
