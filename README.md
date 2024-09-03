@@ -75,11 +75,11 @@ You can handle errors using the `fx/catch>` function:
 ;; => "error"
 ```
 
-or catch all errors using the `fx/catch-all>` function:
+or catch all errors using the `fx/catchall>` function:
 
 ```clojure
 (->> (fx/fail! :error {:value 42})
-     (fx/catch-all>
+     (fx/catchall>
        (fn [e] (fx/succeed> (str "Caught error: " e))))
      (run-sync!))
 ;; => "Caught error: #com.lambdaseq.fx.core.Failure {:data {:value 42}, :type :error}"

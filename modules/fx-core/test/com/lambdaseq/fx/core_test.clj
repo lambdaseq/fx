@@ -253,39 +253,39 @@
 
 
 (deftest catch-all>-test
-  (testing "catch-all> catches all exceptions"
+  (testing "catchall> catches all exceptions"
     (let [res (->> (fail> :test {})
-                   (catch-all> (constantly (succeed> 1)))
+                   (catchall> (constantly (succeed> 1)))
                    (run-sync!))]
       (is (= 1 res)))
     (let [res (->> (fail> :test {})
-                   (catch-all> (constantly (fail> :test {})))
+                   (catchall> (constantly (fail> :test {})))
                    (run-sync!))]
       (is (failure? res))))
-  (testing "catch-all> runs the side effect"
+  (testing "catchall> runs the side effect"
     (let [res (->> (fail> :test {})
-                   (catch-all> (fn [_]
+                   (catchall> (fn [_]
                                  (print "Should print")
                                  (succeed> 1)))
                    (run-sync!)
                    (with-out-str))]
       (is (= "Should print" res))))
-  (testing "catch-all> propagates the value if not a failure"
+  (testing "catchall> propagates the value if not a failure"
     (let [res (->> (succeed> 1)
-                   (catch-all> (constantly (succeed> 2)))
+                   (catchall> (constantly (succeed> 2)))
                    (run-sync!))]
       (is (= 1 res))))
-  (testing "catch-all> body does not evaluate if not a failure"
+  (testing "catchall> body does not evaluate if not a failure"
     (let [res (->> (succeed> 1)
-                   (catch-all> (fn [_]
+                   (catchall> (fn [_]
                                  (print "Should not print")
                                  (succeed> 2)))
                    (run-sync!)
                    (with-out-str))]
       (is (not= "Should not print" res))))
-  (testing "catch-all> body is a function that takes the failure"
+  (testing "catchall> body is a function that takes the failure"
     (let [res (->> (fail> :test {:num 1})
-                   (catch-all> (fn [{:keys [type]
+                   (catchall> (fn [{:keys          [type]
                                      {:keys [num]} :data}]
                                  (case type
                                    :test (succeed> num)

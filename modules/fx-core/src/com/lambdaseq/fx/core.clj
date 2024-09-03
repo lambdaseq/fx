@@ -161,7 +161,7 @@
             value))
         value))))
 
-(defn catch-all>
+(defn catchall>
   "Catches all failures and runs the provided function.
   The function should receive the failure and return an effect."
   [f next-effect]
