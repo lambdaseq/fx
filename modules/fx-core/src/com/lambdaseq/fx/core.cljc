@@ -3,14 +3,14 @@
 (defprotocol IEffect
   (-effect-type [this]
     "Returns the type of the effect.")
-  (-next-effect [this]
+  (-prev-effect [this]
     "Returns the next effect in the chain.")
   (-eval! [this v]
     "Evaluates the run function of the effect and returns the result."))
 
-(defrecord Effect [effect-type next-effect run]
+(defrecord Effect [effect-type prev-effect run]
   IEffect
-  (-next-effect [_] next-effect)
+  (-prev-effect [_] prev-effect)
   (-eval! [_ v] (run v)))
 
 (defprotocol IFailure
@@ -35,8 +35,8 @@
 
 (defn make-effect
   "Given a type keyword, a next effect, and a run function, returns a new effect."
-  [type next-effect run]
-  (Effect. type next-effect run))
+  [type prev-effect run]
+  (Effect. type prev-effect run))
 
 (defn make-failure
   "Given a type keyword and an error map, returns a new failure."
@@ -61,7 +61,7 @@
 
 (defn succeed> [value]
   "Creates a successful effect that just returns the value."
-  (make-effect :succeed nil (constantly value)))
+  (make-effect :succeed nil (fn [_] value)))
 
 (defn fail>
   "Creates a failed effect. Takes a failure or a type and an error to be wrapped in a failure,
@@ -74,9 +74,9 @@
 (defn map>
   "Maps over the effect. Takes a function f and/or an effect,
    and returns a new effect."
-  [f next-effect]
+  [f prev-effect]
   (make-effect :map
-    next-effect
+    prev-effect
     (fn [value]
       (maybe-propagate-failure value
         (f value)))))
@@ -85,9 +85,9 @@
   "Runs the effect and propagates the value to the next effect.
   Useful for running side effects, and making sure the input is passed to the next effect,
   like logging, or updating a database."
-  [f next-effect]
+  [f prev-effect]
   (make-effect :do
-    next-effect
+    prev-effect
     (fn [value]
       (maybe-propagate-failure value
         (do
@@ -107,9 +107,9 @@
 (defn mapcat>
   "Flat maps over the effect. Takes a function f that returns an effect and/or an effect,
    and returns a new effect."
-  [f next-effect]
+  [f prev-effect]
   (make-effect :mapcat
-    next-effect
+    prev-effect
     (fn [value]
       (maybe-propagate-failure value
         (let [res (f value)]
@@ -123,9 +123,9 @@
   "If the condition is true,
      then returns the `then` effect,
      otherwise returns the `else` effect."
-  [cond then> else> next-effect]
+  [cond then> else> prev-effect]
   (make-effect :if
-    next-effect
+    prev-effect
     (fn [value]
       (maybe-propagate-failure value
         (-eval! (if (cond value)
@@ -160,9 +160,9 @@
 (defn catch>
   "Dispatches the failure to the provided handler based on the failure type.
    The functions should receive the failure `data` and return an effect."
-  [f-map next-effect]
+  [f-map prev-effect]
   (make-effect :catch
-    next-effect
+    prev-effect
     (fn [value]
       (if (failure? value)
         (let [failure-type (-failure-type value)
@@ -177,9 +177,9 @@
 (defn catchall>
   "Catches all failures and runs the provided function.
   The function should receive the failure and return an effect."
-  [f next-effect]
+  [f prev-effect]
   (make-effect :catch-all
-    next-effect
+    prev-effect
     (fn [value]
       (if (failure? value)
         (-eval! (f (-error value)) value)
@@ -196,9 +196,10 @@
   "Evaluates the effect and returns the result."
   [effect]
   (->> effect
-       (iterate -next-effect)
+       (iterate -prev-effect)
        (take-while some?)
        (reverse)
        (reduce (fn [acc effect]
                  (-eval! effect acc))
                nil)))
+

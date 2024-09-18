@@ -96,7 +96,7 @@
 (deftest mapcat>-test
   (testing "mapcat> propagates failure"
     (let [res (->> (fail> :test {})
-                   (mapcat> (constantly (succeed> 1)))
+                   (mapcat> (constantly (fail> 1)))
                    (run-sync!))]
       (is (failure? res))))
   (testing "mapcat> run function should not evaluate on failure"
