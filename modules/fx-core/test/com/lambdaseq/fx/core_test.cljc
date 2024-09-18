@@ -125,7 +125,7 @@
 (deftest if>-test
   (testing "if> propagates failure"
     (let [res (->> (fail> :test {})
-                   (if> true
+                   (if> any?
                         (constantly (succeed> 1))
                         (constantly (succeed> 2)))
                    (run-sync!))]
@@ -252,7 +252,7 @@
       (is (= "Should print 1Should print 2" res)))))
 
 
-(deftest catch-all>-test
+(deftest catchall>-test
   (testing "catchall> catches all exceptions"
     (let [res (->> (fail> :test {})
                    (catchall> (constantly (succeed> 1)))
@@ -265,8 +265,8 @@
   (testing "catchall> runs the side effect"
     (let [res (->> (fail> :test {})
                    (catchall> (fn [_]
-                                 (print "Should print")
-                                 (succeed> 1)))
+                                (print "Should print")
+                                (succeed> 1)))
                    (run-sync!)
                    (with-out-str))]
       (is (= "Should print" res))))
@@ -278,18 +278,18 @@
   (testing "catchall> body does not evaluate if not a failure"
     (let [res (->> (succeed> 1)
                    (catchall> (fn [_]
-                                 (print "Should not print")
-                                 (succeed> 2)))
+                                (print "Should not print")
+                                (succeed> 2)))
                    (run-sync!)
                    (with-out-str))]
       (is (not= "Should not print" res))))
   (testing "catchall> body is a function that takes the failure"
     (let [res (->> (fail> :test {:num 1})
-                   (catchall> (fn [{:keys          [type]
-                                     {:keys [num]} :data}]
-                                 (case type
-                                   :test (succeed> num)
-                                   (fail> :test {}))))
+                   (catchall> (fn [{:keys         [type]
+                                    {:keys [num]} :data}]
+                                (case type
+                                  :test (succeed> num)
+                                  (fail> :test {}))))
                    (run-sync!))]
       (is (= 1 res)))))
 

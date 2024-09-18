@@ -1,6 +1,11 @@
 {:aliases
- {:dev   {:extra-deps {fx/core {:local/root "./modules/fx-core"}}}
-  :test  {:extra-paths ["./modules/fx-core/test"]}
+ {:dev   {:extra-deps {fx/core                            {:local/root "./modules/fx-core"}
+                       fx/typed                           {:local/root "./modules/fx-typed"}
+
+                       hashp/hashp                        {:mvn/version "0.2.2"}
+                       org.typedclojure/typed.clj.checker {:mvn/version "1.2.1"}}}
+  :test  {:extra-paths ["./modules/fx-core/test"
+                        "./modules/fx-typed/test"]}
   :build {:deps       {io.github.clojure/tools.build
                        {:git/tag "v0.9.2" :git/sha "fe6b140"}
                        slipset/deps-deploy {:mvn/version "0.2.0"}}

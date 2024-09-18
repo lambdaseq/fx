@@ -4,6 +4,7 @@
     <modules>
       <module fileurl="file://$PROJECT_DIR$/fx.iml" filepath="$PROJECT_DIR$/fx.iml" />
       <module fileurl="file://$PROJECT_DIR$/modules/fx-core/fx-core.iml" filepath="$PROJECT_DIR$/modules/fx-core/fx-core.iml" />
+      <module fileurl="file://$PROJECT_DIR$/modules/fx-typed/fx-typed.iml" filepath="$PROJECT_DIR$/modules/fx-typed/fx-typed.iml" />
     </modules>
   </component>
 </project>

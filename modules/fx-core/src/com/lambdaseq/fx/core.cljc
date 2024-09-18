@@ -1,6 +1,8 @@
 (ns com.lambdaseq.fx.core)
 
 (defprotocol IEffect
+  (-effect-type [this]
+    "Returns the type of the effect.")
   (-next-effect [this]
     "Returns the next effect in the chain.")
   (-eval! [this v]
@@ -11,7 +13,11 @@
   (-next-effect [_] next-effect)
   (-eval! [_ v] (run v)))
 
-(defprotocol IFailure)
+(defprotocol IFailure
+  (-failure-type [this]
+    "Returns the type of the failure.")
+  (-error [this]
+    "Returns the data of the failure."))
 
 (defrecord Failure
   [type data]
@@ -27,10 +33,14 @@
   [x]
   (instance? Failure x))
 
-(defn make-effect [type next-effect run]
+(defn make-effect
+  "Given a type keyword, a next effect, and a run function, returns a new effect."
+  [type next-effect run]
   (Effect. type next-effect run))
 
-(defn make-failure [type err]
+(defn make-failure
+  "Given a type keyword and an error map, returns a new failure."
+  [type err]
   (Failure. type err))
 
 (defmacro maybe-propagate-failure
@@ -72,7 +82,9 @@
         (f value)))))
 
 (defn do>
-  "Runs the effect and propagates the value to the next effect."
+  "Runs the effect and propagates the value to the next effect.
+  Useful for running side effects, and making sure the input is passed to the next effect,
+  like logging, or updating a database."
   [f next-effect]
   (make-effect :do
     next-effect
@@ -153,11 +165,12 @@
     next-effect
     (fn [value]
       (if (failure? value)
-        (let [{:keys [type data]} value
-              f (get f-map type)]
+        (let [failure-type (-failure-type value)
+              error (-error value)
+              f (get f-map failure-type)]
           (if f
             ; maybe it should be (f value)
-            (-eval! (f data) value)
+            (-eval! (f error) value)
             value))
         value))))
 
@@ -169,7 +182,7 @@
     next-effect
     (fn [value]
       (if (failure? value)
-        (-eval! (f value) value)
+        (-eval! (f (-error value)) value)
         value))))
 
 (defmacro pipeline>>

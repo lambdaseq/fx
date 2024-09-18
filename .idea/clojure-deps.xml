@@ -24,6 +24,10 @@
           <option name="type" value="TEST_SOURCE" />
         </FolderState>
         <FolderState>
+          <option name="dirUrl" value="file://$PROJECT_DIR$/modules/fx-typed/test" />
+          <option name="type" value="TEST_SOURCE" />
+        </FolderState>
+        <FolderState>
           <option name="dirUrl" value="file://$PROJECT_DIR$/test" />
           <option name="type" value="TEST_SOURCE" />
         </FolderState>
@@ -33,6 +37,7 @@
       <set>
         <option value="file://$PROJECT_DIR$/deps.edn" />
         <option value="file://$PROJECT_DIR$/modules/fx-core/deps.edn" />
+        <option value="file://$PROJECT_DIR$/modules/fx-typed/deps.edn" />
       </set>
     </option>
   </component>
