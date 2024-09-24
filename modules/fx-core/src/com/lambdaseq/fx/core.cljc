@@ -1,27 +1,54 @@
 (ns com.lambdaseq.fx.core)
 
 (defprotocol IEffect
-  (-effect-type [this]
-    "Returns the type of the effect.")
-  (-prev-effect [this]
-    "Returns the next effect in the chain.")
   (-eval! [this v]
-    "Evaluates the run function of the effect and returns the result."))
+    "Evaluates the run function of the effect and returns the result.")
+  (effect-type [this]
+    "Returns the type of the effect.")
+  (prev-effect [this]
+    "Returns the next effect in the chain."))
 
 (defrecord Effect [effect-type prev-effect run]
   IEffect
-  (-prev-effect [_] prev-effect)
-  (-eval! [_ v] (run v)))
+  (-eval! [_ v] (run v))
+  (prev-effect [_] prev-effect)
+  (effect-type [_] effect-type))
 
 (defprotocol IFailure
-  (-failure-type [this]
+  (failure-type [this]
     "Returns the type of the failure.")
-  (-error [this]
-    "Returns the data of the failure."))
+  (error-data [this]
+    "Returns the error data of the failure."))
 
 (defrecord Failure
-  [type data]
-  IFailure)
+  [type error-data]
+  IFailure
+  (failure-type [_] type)
+  (error-data [_] error-data))
+
+(def ^:dynamic *runner*)
+
+(def ^:dynamic *input*)
+
+(defn run-sync!
+  "Evaluates the effect and returns the result."
+  [effect]
+  (binding [*runner* run-sync!]
+    (->> effect
+         (iterate prev-effect)
+         (take-while some?)
+         (reverse)
+         (reduce (fn [acc effect]
+                   (-eval! effect acc))
+                 nil))))
+
+(defn- -run!
+  "Helper function for running using the current runner"
+  ([effect]
+   (*runner* effect))
+  ([effect input]
+   (binding [*input* input]
+     (*runner* effect))))
 
 (defn effect?
   "Returns true if the value is an effect."
@@ -63,13 +90,19 @@
   "Creates a successful effect that just returns the value."
   (make-effect :succeed nil (fn [_] value)))
 
+(defn input>
+  "Creates an effect that returns the value of *input* when evaluated
+  Useful for higher-order effects (conditional effects, mapcat etc.)"
+  []
+  (make-effect :input nil (fn [_] *input*)))
+
 (defn fail>
   "Creates a failed effect. Takes a failure or a type and an error to be wrapped in a failure,
    and returns a new effect."
   ([failure]
    (make-effect :fail nil (constantly failure)))
-  ([type error]
-   (make-effect :fail nil (constantly (make-failure type error)))))
+  ([type error-data]
+   (make-effect :fail nil (constantly (make-failure type error-data)))))
 
 (defn map>
   "Maps over the effect. Takes a function f and/or an effect,
@@ -107,15 +140,15 @@
 (defn mapcat>
   "Flat maps over the effect. Takes a function f that returns an effect and/or an effect,
    and returns a new effect."
-  [f prev-effect]
+  [inner-effect prev-effect]
   (make-effect :mapcat
     prev-effect
     (fn [value]
       (maybe-propagate-failure value
-        (let [res (f value)]
+        (let [res (-eval! inner-effect value)]
           (if (effect? res)
             ; Maybe should eval with nil here?
-            (-eval! res value)
+            (-run! res value)
             (make-failure :mapcat>-result-not-an-effect
                           {:result res})))))))
 
@@ -123,15 +156,15 @@
   "If the condition is true,
      then returns the `then` effect,
      otherwise returns the `else` effect."
-  [cond then> else> prev-effect]
+  [cond then-effect else-effect prev-effect]
   (make-effect :if
     prev-effect
     (fn [value]
       (maybe-propagate-failure value
-        (-eval! (if (cond value)
-                  (then> value)
-                  (else> value))
-                value)))))
+        (-run! (if (cond value)
+                 then-effect
+                 else-effect)
+               value)))))
 
 (defn cond>
   "Evaluates the conditions in order until one of them returns true,
@@ -147,15 +180,15 @@
                         (partition 2))]
     (make-effect :cond
       effect
-      (fn [v]
-        (maybe-propagate-failure v
-          (-eval! (loop [conditions conditions]
-                    (if-let [[test expr>] (first conditions)]
-                      (if (test v)
-                        (expr> v)
-                        (recur (rest conditions)))
-                      (fail> :cond :no-conditions)))
-                  v))))))
+      (fn [value]
+        (maybe-propagate-failure value
+          (-run! (loop [conditions conditions]
+                   (if-let [[test expr-effect] (first conditions)]
+                     (if (test value)
+                       expr-effect
+                       (recur (rest conditions)))
+                     (fail> :cond :no-conditions)))
+                 value))))))
 
 (defn catch>
   "Dispatches the failure to the provided handler based on the failure type.
@@ -165,41 +198,29 @@
     prev-effect
     (fn [value]
       (if (failure? value)
-        (let [failure-type (-failure-type value)
-              error (-error value)
-              f (get f-map failure-type)]
-          (if f
+        (let [failure-type (failure-type value)
+              error-data (error-data value)
+              f-effect (get f-map failure-type)]
+          (if f-effect
             ; maybe it should be (f value)
-            (-eval! (f error) value)
+            (-run! f-effect error-data)
             value))
         value))))
+
+(defn failure->value
+  "Converts a IFailure object to a plain map"
+  [failure]
+  {:type (failure-type failure)
+   :error-data (error-data failure)})
 
 (defn catchall>
   "Catches all failures and runs the provided function.
   The function should receive the failure and return an effect."
-  [f prev-effect]
+  [inner-effect prev-effect]
   (make-effect :catch-all
     prev-effect
     (fn [value]
       (if (failure? value)
-        (-eval! (f (-error value)) value)
+        (-run! inner-effect
+               (failure->value value))
         value))))
-
-(defmacro pipeline>>
-  "Creates a pipeline of effects."
-  [& body]
-  `(fn [effect#]
-     (->> effect#
-          ~@body)))
-
-(defn run-sync!
-  "Evaluates the effect and returns the result."
-  [effect]
-  (->> effect
-       (iterate -prev-effect)
-       (take-while some?)
-       (reverse)
-       (reduce (fn [acc effect]
-                 (-eval! effect acc))
-               nil)))
-
