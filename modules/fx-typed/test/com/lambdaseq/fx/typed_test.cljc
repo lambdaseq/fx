@@ -102,6 +102,12 @@ fx/IEffect
              (com.lambdaseq.fx.core/IEffect t/Any String
                (com.lambdaseq.fx.core/IFailure (t/Val :fail) (t/Val :foo))))))
 
+(deftest input>-ann-test
+  (testing "input> returns an effect with output type inferred"
+    (is-tc-e (->> (com.lambdaseq.fx.core/input>)
+                  (com.lambdaseq.fx.core/map> inc))
+             (com.lambdaseq.fx.core/IEffect t/Any Long nil))))
+
 (deftest do>-ann--test
   (testing "do> returns the output type of it's previous effect"
     (is-tc-e (->> (com.lambdaseq.fx.core/succeed> 10)
@@ -124,7 +130,11 @@ fx/IEffect
 (deftest mapcat>-ann--test
   (testing "mapcat> returns an effect with output type inferred"
     (is-tc-e (->> (com.lambdaseq.fx.core/succeed> 10)
-                  (com.lambdaseq.fx.core/mapcat> (fn [x] (->> (fx/succeed> x)
-                                                              (fx/map> inc)
-                                                              (fx/map> str)))))
-             (com.lambdaseq.fx.core/IEffect t/Any String nil))))
+                  (com.lambdaseq.fx.core/mapcat> (->> (com.lambdaseq.fx.core/input>)
+                                                      (com.lambdaseq.fx.core/map> inc)
+                                                      (com.lambdaseq.fx.core/map> str))))
+             (com.lambdaseq.fx.core/IEffect t/Any String nil))
+    (is-tc-e (->> (com.lambdaseq.fx.core/succeed> "10")
+                  (com.lambdaseq.fx.core/mapcat> (->> (com.lambdaseq.fx.core/input>)
+                                                      (com.lambdaseq.fx.core/map> parse-long))))
+             (com.lambdaseq.fx.core/IEffect t/Any (t/Option Long) nil))))

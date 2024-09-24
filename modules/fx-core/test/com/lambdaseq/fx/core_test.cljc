@@ -75,7 +75,7 @@
       (let [res (run-sync! eff)]
         (is (failure? res))
         (is (= :test (:type (run-sync! eff))))
-        (is (= err-data (:data (run-sync! eff))))))))
+        (is (= err-data (error-data (run-sync! eff))))))))
 
 (deftest map>-test
   (testing "map> propagates failure"
@@ -287,7 +287,7 @@
                                    (if> (comp #{:test} :type)
                                         (->> (input>)
                                              (map> (comp :num :error-data)))
-                                        (fail> :else {}))))
+                                        (succeed> 10))))
                    (run-sync!))]
       (is (= 1 res)))))
 
@@ -296,11 +296,7 @@
     (let [res (->> (fail> :test {})
                    (catch> {:test (succeed> 1)})
                    (run-sync!))]
-      (is (= 1 res)))
-    (let [res (->> (fail> :test {})
-                   (catch> {:test (fail> :other {})})
-                   (run-sync!))]
-      (is (= (make-failure :other {}) res))))
+      (is (= 1 res))))
   (testing "catch> runs the side effect"
     (let [res (->> (fail> :test {})
                    (catch> {:test (->> (succeed> 1)
@@ -323,9 +319,5 @@
   (testing "catch> propagates the failure if not caught"
     (let [res (->> (fail> :test {})
                    (catch> {:other (succeed> 1)})
-                   (run-sync!))]
-      (is (= (make-failure :test {}) res)))
-    (let [res (->> (fail> :test {})
-                   (catch> {:other (fail> :test {})})
                    (run-sync!))]
       (is (= (make-failure :test {}) res)))))

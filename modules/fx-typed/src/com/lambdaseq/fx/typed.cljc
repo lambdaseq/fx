@@ -32,16 +32,13 @@
 
 (t/ann fx/succeed> (t/All [x] [x -> (fx/IEffect nil x nil)]))
 
+(t/ann fx/input> (t/All [x] [-> (fx/IEffect x x nil)]))
+
 (t/ann fx/fail>
-       ; TODO: This doesn't work, but it should.
-       (t/All [x]
-              [x -> (fx/IEffect t/Any t/Nothing (fx/IFailure (t/Value :fail) x))])
-       #_(t/Fn
-         (t/All [x]
-                [x -> (fx/IEffect t/Any t/Nothing (fx/IFailure (t/Value :fail) x))])
-         (t/All [[key :< t/Keyword] x]
-                [key x
-                 -> (fx/IEffect t/Any t/Nothing (fx/IFailure key x))])))
+       (t/All [[key :< t/Keyword] x]
+              (t/IFn
+                     [x -> (fx/IEffect t/Any t/Nothing (fx/IFailure (t/Value :fail) x))]
+                     [key x -> (fx/IEffect t/Any t/Nothing (fx/IFailure key x))])))
 
 (t/ann fx/map> (t/All [in out failure]
                       [[in -> out]
@@ -54,18 +51,18 @@
                       -> (fx/IEffect t/Any out failure)]))
 
 (t/ann fx/mapcat> (t/All [in out failure]
-                         [[in -> (fx/IEffect t/Any out failure)]
+                         [(fx/IEffect in out failure)
                           (fx/IEffect t/Any in failure)
                           -> (fx/IEffect t/Any out failure)]))
 
 (t/ann fx/if> (t/All [in then-out else-out failure then-failure else-failure]
                      [[in -> Boolean]
-                      [in -> (fx/IEffect t/Any then-out then-failure)]
-                      [in -> (fx/IEffect t/Any else-out else-failure)]
-                      -> (fx/IEffect in (t/U then-out else-out) (t/U failure then-failure else-failure))]))
+                      (fx/IEffect in then-out then-failure)
+                      (fx/IEffect in else-out else-failure)
+                      -> (fx/IEffect in (t/U then-out else-out) failure)]))
 
-(t/ann fx/catch> (t/All [in out error]
-                        [(t/HMap t/Keyword [error -> (fx/IEffect t/Any out nil)])
+(t/ann fx/catch> (t/All [in out failure]
+                        [(t/HMap t/Keyword (fx/IEffect error out nil))
                          (fx/IEffect t/any in prev-failure)
                          -> (fx/IEffect in out prev-failure)]))
 
@@ -75,5 +72,8 @@
                             -> (fx/IEffect in out nil)]))
 
 (t/ann fx/run-sync! (t/All [in out]
-                           [(fx/IEffect in out t/Nothing)
-                            -> out]))
+                           (t/IFn [(fx/IEffect in out t/Nothing)
+                                   -> out]
+                                  [(fx/IEffect in out t/Nothing)
+                                   in
+                                   -> out]) ))
