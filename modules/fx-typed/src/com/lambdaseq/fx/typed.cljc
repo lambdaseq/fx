@@ -2,32 +2,28 @@
   (:require [com.lambdaseq.fx.core :as fx]
             [typed.clojure :as t]))
 
-(t/ann-protocol [[in :variance :contravariant]
+(t/ann-protocol [[in :variance :covariant]
                  [out :variance :covariant]
                  [failure :variance :covariant]] fx/IEffect
-                -effect-type [(fx/IEffect in out failure)
-                              -> t/Keyword]
-                -prev-effect [(fx/IEffect in out failure) -> (t/Option (fx/IEffect t/Any in failure))]
-                -eval! [(fx/IEffect in out failure)
-                        -> out])
+  -effect-type [(fx/IEffect in out failure)
+                -> t/Keyword]
+  -prev-effect [(fx/IEffect in out failure) -> (t/Option (fx/IEffect t/Any in failure))]
+  -eval! [(fx/IEffect in out failure)
+          -> out])
 
 (t/ann-protocol [[failure-type :< t/Keyword :variance :covariant]
                  [error :variance :covariant]] fx/IFailure
-                -failure-type [(fx/IFailure error) -> failure-type]
-                -error [(fx/IFailure error) -> error])
+  -failure-type [(fx/IFailure error) -> failure-type]
+  -error [(fx/IFailure error) -> error])
 
 (t/ann fx/effect? [t/Any -> Boolean])
-
-
 
 (t/ann fx/failure? [t/Any -> Boolean])
 
 (t/ann fx/make-effect (t/All [in out failure]
                              [t/Keyword
                               (t/Option (fx/IEffect t/Any in failure))
-                              ; TODO: Capture this function's errors in the type system
-                              [in -> (t/U out failure)]
-                              ; TODO: Captured failure should be unionized with previous failure type
+                              [in -> out]
                               -> (fx/IEffect in out failure)]))
 
 (t/ann fx/make-failure (t/All [[key :< t/Keyword] error]
@@ -36,12 +32,16 @@
 
 (t/ann fx/succeed> (t/All [x] [x -> (fx/IEffect nil x nil)]))
 
-(t/ann fx/fail> (t/Fn
-                  (t/All [x]
-                         [x -> (fx/IEffect t/Any nil (fx/IFailure (t/Value :fail) x))])
-                  (t/All [[key :< t/Keyword] x]
-                         [key x
-                          -> (fx/IEffect t/Any nil (fx/IFailure key x))])))
+(t/ann fx/fail>
+       ; TODO: This doesn't work, but it should.
+       (t/All [x]
+              [x -> (fx/IEffect t/Any t/Nothing (fx/IFailure (t/Value :fail) x))])
+       #_(t/Fn
+         (t/All [x]
+                [x -> (fx/IEffect t/Any t/Nothing (fx/IFailure (t/Value :fail) x))])
+         (t/All [[key :< t/Keyword] x]
+                [key x
+                 -> (fx/IEffect t/Any t/Nothing (fx/IFailure key x))])))
 
 (t/ann fx/map> (t/All [in out failure]
                       [[in -> out]
