@@ -20,7 +20,7 @@
     (testing "Failure type is correct"
       (is (= :test (:type fail))))
     (testing "Failure data is correct"
-      (is (= err-data (:data fail))))))
+      (is (= err-data (error-data fail))))))
 
 (deftest maybe-propagate-failure-test
   (let [eff (make-effect :test nil (constantly 1))
@@ -65,7 +65,6 @@
 
 (deftest fail>-test
   (let [err-data {:a 1}
-        failure (make-failure :test err-data)
         eff (fail> :test err-data)]
     (testing "Return value of fail> is a valid effect"
       (is (effect? eff)))

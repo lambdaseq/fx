@@ -37,8 +37,8 @@
 (t/ann fx/fail>
        (t/All [[key :< t/Keyword] x]
               (t/IFn
-                     [x -> (fx/IEffect t/Any t/Nothing (fx/IFailure (t/Value :fail) x))]
-                     [key x -> (fx/IEffect t/Any t/Nothing (fx/IFailure key x))])))
+                [x -> (fx/IEffect t/Any t/Nothing (fx/IFailure (t/Value :fail) x))]
+                [key x -> (fx/IEffect t/Any t/Nothing (fx/IFailure key x))])))
 
 (t/ann fx/map> (t/All [in out failure]
                       [[in -> out]
@@ -75,5 +75,4 @@
                            (t/IFn [(fx/IEffect in out t/Nothing)
                                    -> out]
                                   [(fx/IEffect in out t/Nothing)
-                                   in
-                                   -> out]) ))
+                                   in -> out])))
