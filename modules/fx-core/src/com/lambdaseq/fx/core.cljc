@@ -26,29 +26,17 @@
   (failure-type [_] type)
   (error-data [_] error-data))
 
-(def ^:dynamic *runner*)
-
-(def ^:dynamic *input*)
-
-(defn run-sync!
-  "Evaluates the effect and returns the result."
-  [effect]
-  (binding [*runner* run-sync!]
-    (->> effect
-         (iterate prev-effect)
-         (take-while some?)
-         (reverse)
-         (reduce (fn [acc effect]
-                   (-eval! effect acc))
-                 nil))))
+(def ^:dynamic *context* {})
 
 (defn- -run!
   "Helper function for running using the current runner"
   ([effect]
-   (*runner* effect))
+   (let [{:keys [runner]} *context*]
+     (runner effect)))
   ([effect input]
-   (binding [*input* input]
-     (*runner* effect))))
+   (binding [*context* (assoc *context* :input input)]
+     (let [{:keys [runner]} *context*]
+       (runner effect)))))
 
 (defn effect?
   "Returns true if the value is an effect."
@@ -94,7 +82,7 @@
   "Creates an effect that returns the value of *input* when evaluated
   Useful for higher-order effects (conditional effects, mapcat etc.)"
   []
-  (make-effect :input nil (fn [_] *input*)))
+  (make-effect :input nil (fn [_] (get *context* :input))))
 
 (defn fail>
   "Creates a failed effect. Takes a failure or a type and an error to be wrapped in a failure,
@@ -224,3 +212,15 @@
         (-run! inner-effect
                (failure->value value))
         value))))
+
+(defn run-sync!
+  "Evaluates the effect and returns the result."
+  [effect]
+  (binding [*context* (assoc *context* :runner run-sync!)]
+    (->> effect
+         (iterate prev-effect)
+         (take-while some?)
+         (reverse)
+         (reduce (fn [acc effect]
+                   (-eval! effect acc))
+                 nil))))

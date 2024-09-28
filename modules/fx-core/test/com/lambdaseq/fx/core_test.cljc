@@ -60,7 +60,7 @@
     (testing "Effect run function is correct"
       (dotimes [_ 100]
         (let [v (rand-int 100)]
-          (binding [*input* v]
+          (binding [*context* {:input v}]
             (is (= v (run-sync! eff)))))))))
 
 (deftest fail>-test
@@ -319,4 +319,10 @@
     (let [res (->> (fail> :test {})
                    (catch> {:other (succeed> 1)})
                    (run-sync!))]
-      (is (= (make-failure :test {}) res)))))
+      (is (= (make-failure :test {}) res))))
+  (testing "catch> input is error data"
+    (let [res (->> (fail> :test {:a 1})
+                   (catch> {:test (->> (input>)
+                                       (map> #(update % :a inc)))})
+                   (run-sync!))]
+      (is (= {:a 2} res)))))
