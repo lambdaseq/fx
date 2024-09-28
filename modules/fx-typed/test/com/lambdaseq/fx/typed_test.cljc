@@ -3,7 +3,7 @@
             [com.lambdaseq.fx.core :as fx]
             [com.lambdaseq.fx.core]
             [com.lambdaseq.fx.typed]
-            [typed.clj.checker.test-utils :refer [is-tc-e]]
+            [typed.clj.checker.test-utils :as tu :refer [is-tc-e is-tc-err]]
             [typed.clojure :as t]))
 fx/IEffect
 
@@ -146,4 +146,9 @@ fx/IEffect
     (is-tc-e (->> (com.lambdaseq.fx.core/succeed> "10")
                   (com.lambdaseq.fx.core/mapcat> (->> (com.lambdaseq.fx.core/input>)
                                                       (com.lambdaseq.fx.core/map> parse-long))))
-             (com.lambdaseq.fx.core/IEffect t/Any (t/Option Long) nil '{}))))
+             (com.lambdaseq.fx.core/IEffect t/Any (t/Option Long) nil '{}))
+    ; TODO: Expecting this to fail but doesn't
+    (is-tc-err (->> (com.lambdaseq.fx.core/succeed> "10")
+                    (com.lambdaseq.fx.core/mapcat> (->> (com.lambdaseq.fx.core/input>)
+                                                        (com.lambdaseq.fx.core/map> inc)
+                                                        (com.lambdaseq.fx.core/map> str)))))))
