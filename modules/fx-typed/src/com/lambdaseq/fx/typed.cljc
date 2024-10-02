@@ -2,7 +2,7 @@
   (:require [com.lambdaseq.fx.core :as fx]
             [typed.clojure :as t]))
 
-(t/defalias Context (t/HMap :mandatory {}))
+(t/defalias Context '{})
 
 (t/ann-protocol [[failure-type :< t/Keyword :variance :covariant]
                  [error :variance :covariant]] fx/IFailure
@@ -37,7 +37,7 @@
 
 (t/ann fx/succeed> (t/All [x] [x -> (fx/IEffect nil x nil Context)]))
 
-(t/ann fx/input> (t/All [x] [-> (fx/IEffect t/Any x nil (t/Assoc Context ':input x))]))
+(t/ann fx/input> (t/All [x [context :< Context]] [-> (fx/IEffect t/Any x nil (t/Assoc context ':input x))]))
 
 (t/ann fx/fail>
        (t/All [[key :< t/Keyword] x]
