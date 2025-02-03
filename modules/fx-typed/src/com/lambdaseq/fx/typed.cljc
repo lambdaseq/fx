@@ -37,7 +37,8 @@
 
 (t/ann fx/succeed> (t/All [x] [x -> (fx/IEffect nil x nil Context)]))
 
-(t/ann fx/input> (t/All [x [context :< Context]] [-> (fx/IEffect t/Any x nil (t/Assoc context ':input x))]))
+(t/ann fx/input> (t/All [x [context :< Context]]
+                        [-> (fx/IEffect t/Any x nil (t/Assoc context ':input x))]))
 
 (t/ann fx/fail>
        (t/All [[key :< t/Keyword] x]
@@ -97,3 +98,10 @@
                                    -> out]
                                   [(fx/IEffect in out t/Nothing context)
                                    in -> out])))
+
+(comment
+
+  (def testing)
+  (t/ann testing (t/All [[context :< Context]] (t/Assoc context ':input t/Keyword)))
+  (t/cf testing)
+  )

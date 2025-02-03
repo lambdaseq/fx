@@ -111,9 +111,8 @@
     prev-effect
     (fn [value]
       (maybe-propagate-failure value
-        (do
-          (f value)
-          value)))))
+        (f value)
+        value))))
 
 (defn all>
   "Combines the effects into a single effect that returns a vector of the results of the effects."
@@ -155,7 +154,8 @@
                value)))))
 
 (defn cond>
-  "Evaluates the conditions in order until one of them returns true,
+  "Evaluates
+  the conditions in order until one of them returns true,
    then returns the effect associated with that condition.
    Conditions are test and expr pairs. tests are functions that take the result of the previous effect,
    and exprs are functions that take the result of the previous effect and return effects.
