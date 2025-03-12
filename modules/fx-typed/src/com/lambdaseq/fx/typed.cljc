@@ -37,9 +37,6 @@
 
 (t/ann fx/succeed> (t/All [x] [x -> (fx/IEffect nil x nil Context)]))
 
-(t/ann fx/input> (t/All [x [context :< Context]]
-                        [-> (fx/IEffect t/Any x nil (t/Assoc context ':input x))]))
-
 (t/ann fx/fail>
        (t/All [[key :< t/Keyword] x]
               (t/IFn
@@ -49,48 +46,48 @@
 (t/ann fx/map> (t/All [in out
                        [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
                        [context :< Context]]
-                      [[in -> out]
-                       (fx/IEffect t/Any in failure context)
-                       -> (fx/IEffect t/Any out failure context)]))
+                      [(fx/IEffect t/Any in failure context) :?
+                       [in -> out]
+                       -> (fx/IEffect in out failure context)]))
 
 (t/ann fx/do> (t/All [out
                       [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
                       [context :< Context]]
-                     [[out -> t/Any]
-                      (fx/IEffect t/Any out failure context)
+                     [(fx/IEffect t/Any out failure context) :?
+                      [out -> t/Any]
                       -> (fx/IEffect t/Any out failure context)]))
 
 (t/ann fx/mapcat> (t/All [in out
                           [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
                           [context :< Context]]
-                         [(fx/IEffect t/Any out failure (t/Assoc context ':input in))
-                          (fx/IEffect t/Any in failure context)
-                          -> (fx/IEffect t/Any out failure context)]))
+                         [(fx/IEffect t/Any in failure context) :?
+                          (fx/IEffect in out failure context)
+                          -> (fx/IEffect in out failure context)]))
 
 (t/ann fx/if> (t/All [in then-out else-out
-                      failure then-failure else-failure
+                      failure
                       [context :< Context]]
-                     [[in -> Boolean]
-                      (fx/IEffect in then-out then-failure (t/Assoc context ':input in))
-                      (fx/IEffect in else-out else-failure (t/Assoc context ':input in))
-                      (fx/IEffect t/Any in failure context)
+                     [(fx/IEffect t/Any in failure context) :?
+                      (fx/IEffect in Boolean failure context)
+                      (fx/IEffect in then-out failure context)
+                      (fx/IEffect in else-out failure context)
                       -> (fx/IEffect in (t/U then-out else-out) failure context)]))
 
 (t/ann fx/catch> (t/All [in out
                          [failure :< (fx/IFailure t/Any error)]
                          [context :< Context]]
-                        [(t/HMap t/Keyword (fx/IEffect t/Any out
+                        [(fx/IEffect t/any in prev-failure context) :?
+                         (t/HMap t/Keyword (fx/IEffect t/Any out
                                              ; TODO: Here nil is not correct, it should be the union of all failures that are not handled
                                              nil
                                              (t/Assoc context ':input error)))
-                         (fx/IEffect t/any in prev-failure context)
                          -> (fx/IEffect in out prev-failure context)]))
 
 (t/ann fx/catchall> (t/All [in out
                             [failure :< (fx/IFailure t/Any error)]
                             [context :< Context]]
-                           [(fx/IEffect t/Any out nil (t/Assoc context ':input error))
-                            (fx/IEffect t/Any in prev-failure context)
+                           [(fx/IEffect t/Any in failure context)
+                            (fx/IEffect t/Any out nil context)
                             -> (fx/IEffect in out nil context)]))
 
 (t/ann fx/run-sync! (t/All [in out [context :< Context]]
@@ -98,10 +95,3 @@
                                    -> out]
                                   [(fx/IEffect in out t/Nothing context)
                                    in -> out])))
-
-(comment
-
-  (def testing)
-  (t/ann testing (t/All [[context :< Context]] (t/Assoc context ':input t/Keyword)))
-  (t/cf testing)
-  )

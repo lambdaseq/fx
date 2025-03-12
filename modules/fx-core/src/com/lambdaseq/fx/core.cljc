@@ -26,17 +26,16 @@
   (failure-type [_] type)
   (error-data [_] error-data))
 
+(defn chain> [prev-effect current-effect]
+  (assoc current-effect :prev-effect prev-effect))
+
 (def ^:dynamic *context* {})
 
 (defn- -run!
   "Helper function for running using the current runner"
-  ([effect]
-   (let [{:keys [runner]} *context*]
-     (runner effect)))
-  ([effect input]
-   (binding [*context* (assoc *context* :input input)]
-     (let [{:keys [runner]} *context*]
-       (runner effect)))))
+  [effect]
+  (let [{:keys [runner]} *context*]
+    (runner effect)))
 
 (defn effect?
   "Returns true if the value is an effect."
@@ -62,27 +61,23 @@
   "If the value is an effect, then returns it, otherwise evaluates the body.
   Useful for propagating failures in effects that handle only values."
   [v & body]
-  `(if (failure? ~v)
-     ~v
-     (do ~@body)))
+  `(let [v# ~v]
+     (if (failure? v#)
+       v#
+       (do ~@body))))
 
 (defmacro maybe-propagate-effect
   "If the value is an effect, then returns it, otherwise evaluates the body.
   Useful for propagating effects, in effects that handle only failures."
   [v & body]
-  `(if (effect? ~v)
-     ~v
-     (do ~@body)))
+  `(let [v# ~v]
+     (if (effect? v#)
+       v#
+       (do ~@body))))
 
 (defn succeed> [value]
   "Creates a successful effect that just returns the value."
   (make-effect :succeed nil (fn [_] value)))
-
-(defn input>
-  "Creates an effect that returns the value of *input* when evaluated
-  Useful for higher-order effects (conditional effects, mapcat etc.)"
-  []
-  (make-effect :input nil (fn [_] (get *context* :input))))
 
 (defn fail>
   "Creates a failed effect. Takes a failure or a type and an error to be wrapped in a failure,
@@ -95,24 +90,28 @@
 (defn map>
   "Maps over the effect. Takes a function f and/or an effect,
    and returns a new effect."
-  [f prev-effect]
-  (make-effect :map
-    prev-effect
-    (fn [value]
-      (maybe-propagate-failure value
-        (f value)))))
+  ([f]
+   (map> nil f))
+  ([prev-effect f]
+   (make-effect :map
+     prev-effect
+     (fn [value]
+       (maybe-propagate-failure value
+         (f value))))))
 
 (defn do>
   "Runs the effect and propagates the value to the next effect.
   Useful for running side effects, and making sure the input is passed to the next effect,
   like logging, or updating a database."
-  [f prev-effect]
-  (make-effect :do
-    prev-effect
-    (fn [value]
-      (maybe-propagate-failure value
-        (f value)
-        value))))
+  ([f]
+   (do> nil f))
+  ([prev-effect f]
+   (make-effect :do
+     prev-effect
+     (fn [value]
+       (maybe-propagate-failure value
+         (f value)
+         value)))))
 
 (defn all>
   "Combines the effects into a single effect that returns a vector of the results of the effects."
@@ -127,31 +126,37 @@
 (defn mapcat>
   "Flat maps over the effect. Takes a function f that returns an effect and/or an effect,
    and returns a new effect."
-  [inner-effect prev-effect]
-  (make-effect :mapcat
-    prev-effect
-    (fn [value]
-      (maybe-propagate-failure value
-        (let [res (-eval! inner-effect value)]
-          (if (effect? res)
-            ; Maybe should eval with nil here?
-            (-run! res value)
-            (make-failure :mapcat>-result-not-an-effect
-                          {:result res})))))))
+  ([inner-effect]
+   (mapcat> nil inner-effect))
+  ([prev-effect inner-effect]
+   (make-effect :mapcat
+     prev-effect
+     (fn [value]
+       (maybe-propagate-failure value
+         (if (effect? inner-effect)
+           ; Maybe should eval with nil here?
+           (-run! (chain> (succeed> value)
+                          inner-effect))
+           (make-failure :mapcat>-result-not-an-effect
+                         {:result inner-effect})))))))
 
 (defn if>
   "If the condition is true,
      then returns the `then` effect,
      otherwise returns the `else` effect."
-  [cond then-effect else-effect prev-effect]
-  (make-effect :if
-    prev-effect
-    (fn [value]
-      (maybe-propagate-failure value
-        (-run! (if (cond value)
-                 then-effect
-                 else-effect)
-               value)))))
+  ([cond-eff then-effect else-effect]
+   (if> nil cond-eff then-effect else-effect))
+  ([prev-effect cond-eff then-effect else-effect]
+   (make-effect :if
+     prev-effect
+     (fn [value]
+       (maybe-propagate-failure value
+         (let [branch-eff (if (-run! (chain> (succeed> value)
+                                             cond-eff))
+                            then-effect
+                            else-effect)]
+           (-run! (chain> (succeed> value)
+                          branch-eff))))))))
 
 (defn cond>
   "Evaluates
@@ -161,57 +166,61 @@
    and exprs are functions that take the result of the previous effect and return effects.
 
    If no conditions are met, then returns a failure."
-  [& conditions]
-  (let [effect (last conditions)
-        conditions (->> conditions
-                        (butlast)
-                        (partition 2))]
+  [prev-effect & conditions]
+  (let [conditions (partition 2 conditions)]
     (make-effect :cond
-      effect
+      prev-effect
       (fn [value]
         (maybe-propagate-failure value
-          (-run! (loop [conditions conditions]
-                   (if-let [[test expr-effect] (first conditions)]
-                     (if (test value)
-                       expr-effect
-                       (recur (rest conditions)))
-                     (fail> :cond :no-conditions)))
-                 value))))))
+          (let [res-eff (loop [conditions conditions]
+                          (if-let [[test-eff expr-effect] (first conditions)]
+                            (if (-run! (chain> (succeed> value)
+                                               test-eff))
+                              expr-effect
+                              (recur (rest conditions)))
+                            (fail> :cond :no-conditions)))]
+            (-run! (chain> (succeed> value)
+                           res-eff))))))))
 
 (defn catch>
   "Dispatches the failure to the provided handler based on the failure type.
    The functions should receive the failure `data` and return an effect."
-  [f-map prev-effect]
-  (make-effect :catch
-    prev-effect
-    (fn [value]
-      (if (failure? value)
-        (let [failure-type (failure-type value)
-              error-data (error-data value)
-              f-effect (get f-map failure-type)]
-          (if f-effect
-            ; maybe it should be (f value)
-            (-run! f-effect error-data)
-            value))
-        value))))
+  ([f-map]
+   (catch> nil f-map))
+  ([prev-effect f-map]
+   (make-effect :catch
+     prev-effect
+     (fn [value]
+       (if (failure? value)
+         (let [failure-type (failure-type value)
+               error-data (error-data value)
+               f-effect (get f-map failure-type)]
+           (if f-effect
+             ; maybe it should be (f value)
+             (-run! (chain> (succeed> error-data)
+                            f-effect))
+             value))
+         value)))))
 
 (defn failure->value
   "Converts a IFailure object to a plain map"
   [failure]
-  {:type (failure-type failure)
+  {:type       (failure-type failure)
    :error-data (error-data failure)})
 
 (defn catchall>
   "Catches all failures and runs the provided function.
   The function should receive the failure and return an effect."
-  [inner-effect prev-effect]
-  (make-effect :catch-all
-    prev-effect
-    (fn [value]
-      (if (failure? value)
-        (-run! inner-effect
-               (failure->value value))
-        value))))
+  ([inner-effect]
+   (catchall> nil inner-effect))
+  ([prev-effect inner-effect]
+   (make-effect :catch-all
+     prev-effect
+     (fn [value]
+       (if (failure? value)
+         (-run! (chain> (succeed> (failure->value value))
+                        inner-effect))
+         value)))))
 
 (defn run-sync!
   "Evaluates the effect and returns the result."
