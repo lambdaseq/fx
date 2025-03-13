@@ -117,11 +117,8 @@
                  (map> str))
              (IEffect t/Any String nil '{})
              :requires [[com.lambdaseq.fx.core :refer :all]
-                        [com.lambdaseq.fx.typed]])
-    (is-tc-e (map> str (succeed> "str"))
-             (IEffect t/Any String nil '{})
-             :requires [[com.lambdaseq.fx.core :refer :all]
                         [com.lambdaseq.fx.typed]]))
+
   (testing "chaining map> effects"
     (is-tc-e (-> (succeed> 10)
                  (map> inc)
@@ -136,6 +133,7 @@
              (IEffect t/Any (t/Option Long) nil '{})
              :requires [[com.lambdaseq.fx.core :refer :all]
                         [com.lambdaseq.fx.typed]]))
+
   (testing "map> infers and propagates failure type in its type"
     (is-tc-e (-> (fail> :foo)
                  (map> inc))
@@ -151,7 +149,14 @@
                       (IFailure (t/Val :fail) (t/Val :foo))
                       '{})
              :requires [[com.lambdaseq.fx.core :refer :all]
-                        [com.lambdaseq.fx.typed]])))
+                        [com.lambdaseq.fx.typed]]))
+
+  (testing "map> typing fails when previous' effect output
+            does not match the mapping function's input"
+    (is-tc-err (-> (succeed> "str")
+                   (map> inc))
+               :requires [[com.lambdaseq.fx.core :refer :all]
+                          [com.lambdaseq.fx.typed]])))
 
 (deftest do>-ann--test
   (testing "do> returns the output type of it's previous effect"
@@ -195,7 +200,7 @@
              :requires [[com.lambdaseq.fx.core :refer :all]
                         [com.lambdaseq.fx.typed]])
     ; TODO: Expecting this to fail but doesn't
-    (is-tc-err ^::t/dbg (-> (succeed> "10")
-                            (mapcat> ^::t/dbg (map> inc)))
+    (is-tc-err (-> (succeed> "10")
+                   (mapcat> (map> inc)))
                :requires [[com.lambdaseq.fx.core :refer :all]
                           [com.lambdaseq.fx.typed]])))
