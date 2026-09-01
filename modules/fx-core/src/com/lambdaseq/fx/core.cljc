@@ -1,4 +1,5 @@
-(ns com.lambdaseq.fx.core)
+(ns com.lambdaseq.fx.core
+  (:refer-clojure :exclude [tap>]))
 
 (declare run-sync!)
 
@@ -138,24 +139,49 @@
        (maybe-propagate-failure value
          (f value *context*))))))
 
-(defn do>
+(defn tap>
   "Executes a side-effecting function `f` on the successful value (e.g. logging or metrics)
    and propagates the original value unchanged to the next effect in the pipeline.
    Short-circuits if the upstream effect yielded a failure.
 
    Example:
      (-> (fx/succeed> 10)
-         (fx/do> #(println \"Current value:\" %))
+         (fx/tap> #(println \"Current value:\" %))
          (fx/map> inc))"
   ([f]
-   (do> nil f))
+   (tap> nil f))
   ([prev-effect f]
-   (make-effect :do
+   (make-effect :tap
      prev-effect
      (fn [value]
        (maybe-propagate-failure value
          (f value)
          value)))))
+
+(defn tap-error>
+  "Executes a side-effecting function `f` on the failure (e.g. logging or metrics)
+   when a failure occurs, and propagates the original failure unchanged to the next
+   effect in the pipeline. Short-circuits (does not run `f`) if the upstream effect succeeded.
+
+   Example:
+     (-> (fx/fail> :not-found {:id 10})
+         (fx/tap-error> (fn [err] (println \"Failed with tag:\" (fx/tag err))))
+         (fx/catch> ...))"
+  ([f]
+   (tap-error> nil f))
+  ([prev-effect f]
+   (make-effect :tap-error
+     prev-effect
+     (fn [value]
+       (if (failure? value)
+         (do
+           (f value)
+           value)
+         value)))))
+
+(def tap-error
+  "Alias for `tap-error>`."
+  tap-error>)
 
 (defn do-ctx>
   "Executes a side-effecting binary function `(f value context)` on the successful value and
@@ -266,16 +292,16 @@
 
    Supports point-free pipeline usage:
      (-> (fx/succeed> 10)
-         (fx/ensure> (fx/do> (fn [_] (println \"Cleanup\")))))
+         (fx/ensure> (fx/tap> (fn [_] (println \"Cleanup\")))))
 
      (-> (fx/fail> :not-found {:id 42})
-         (fx/ensure> (fx/do> (fn [_] (println \"Cleanup\")))))"
+         (fx/ensure> (fx/tap> (fn [_] (println \"Cleanup\")))))"
   ([finalizer-effect]
    (ensure> nil finalizer-effect))
   ([prev-effect finalizer-effect]
    (let [eff (if (effect? finalizer-effect)
                finalizer-effect
-               (do> finalizer-effect))]
+               (tap> finalizer-effect))]
      (make-effect :ensure
        prev-effect
        (fn [value]

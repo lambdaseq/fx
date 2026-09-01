@@ -27,7 +27,7 @@ Functions that create or transform effects end in `>`, and functions that execut
 
 (-> (fx/succeed> 20)
     (fx/map> inc)
-    (fx/do> (fn [v] (println "Current value:" v)))
+    (fx/tap> (fn [v] (println "Current value:" v)))
     (fx/mapcat> (fx/map> (fn [v] (* v 2))))
     (fx/run-sync!))
 ;; Prints: "Current value: 21"
@@ -39,7 +39,7 @@ Functions that create or transform effects end in `>`, and functions that execut
 - **Effects as data**: Combinators return lazy, inspectable `Effect` records describing steps in a computation.
 - **Thread-first composition**: Effects chain naturally with standard Clojure `->` threading.
 - **Two output channels**: Pipelines yield either a success value or a typed `Failure` record.
-- **Automatic short-circuiting**: On failure, downstream `map>`, `mapcat>`, and `do>` steps are skipped automatically.
+- **Automatic short-circuiting**: On failure, downstream `map>`, `mapcat>`, and `tap>` steps are skipped automatically.
 - **Explicit execution**: Pipelines stay inert until evaluated with `run-sync!`.
 
 ## API Overview
@@ -51,7 +51,8 @@ Functions that create or transform effects end in `>`, and functions that execut
 | `map>` | `([f] [eff f])` | Transforms successful values with unary function `f`. |
 | `map-ctx>` | `([f] [eff f])` | Transforms successful values with binary function `(f val context)`. |
 | `mapcat>` | `([inner-eff] [eff inner-eff])` | Flat-maps over an effect with an effect combinator. |
-| `do>` | `([f] [eff f])` | Executes side-effect `f` and passes the value through unchanged. |
+| `tap>` | `([f] [eff f])` | Executes side-effect `f` on success and passes the value through unchanged. |
+| `tap-error>` | `([f] [eff f])` | Executes side-effect `f` on failure and passes the failure through unchanged. |
 | `do-ctx>` | `([f] [eff f])` | Executes side-effect `(f val context)` and passes value unchanged. |
 | `context>` | `([] [key] [key default])` | Yields the active execution context map or a key value. |
 | `service>` | `([key] [key default])` | Extracts a service dependency from the active context. |
@@ -87,17 +88,27 @@ Effects are constructed using `succeed>` or `fail>`. Upstream failures short-cir
 ;; => #com.lambdaseq.fx.core.Failure{:tag :not-found, :error-data {:user-id 123}}
 ```
 
-### Side Effects with `do>`
+### Side Effects with `tap>` and `tap-error>`
 
-Use `do>` for logging, metric collection, or instrumentation. The original value is preserved:
+Use `tap>` for logging, metric collection, or instrumentation on the success channel. The original value is preserved:
 
 ```clojure
 (-> (fx/succeed> {:status 200})
-    (fx/do> (fn [res] (println "Response received:" res)))
+    (fx/tap> (fn [res] (println "Response received:" res)))
     (fx/map> :status)
     (fx/run-sync!))
 ;; Prints: "Response received: {:status 200}"
 ;; => 200
+```
+
+Use `tap-error>` (or `tap-error>`) to inspect failures without recovering from them:
+
+```clojure
+(-> (fx/fail> :not-found {:user-id 123})
+    (fx/tap-error> (fn [err] (println "Failed with tag:" (fx/tag err))))
+    (fx/run-sync!))
+;; Prints: "Failed with tag: :not-found"
+;; => #com.lambdaseq.fx.core.Failure{:tag :not-found, :error-data {:user-id 123}}
 ```
 
 ### Guaranteed Finalization with `ensure>`
@@ -107,14 +118,14 @@ Use `do>` for logging, metric collection, or instrumentation. The original value
 ```clojure
 ;; Finalizer runs on success; original value is preserved
 (-> (fx/succeed> "data")
-    (fx/ensure> (fx/do> (fn [_] (println "Cleaning up resources..."))))
+    (fx/ensure> (fx/tap> (fn [_] (println "Cleaning up resources..."))))
     (fx/run-sync!))
 ;; Prints: "Cleaning up resources..."
 ;; => "data"
 
 ;; Finalizer runs on failure; original failure is preserved
 (-> (fx/fail> :network-error {:url "http://example.com"})
-    (fx/ensure> (fx/do> (fn [_] (println "Closing connection..."))))
+    (fx/ensure> (fx/tap> (fn [_] (println "Closing connection..."))))
     (fx/run-sync!))
 ;; Prints: "Closing connection..."
 ;; => #com.lambdaseq.fx.core.Failure{:tag :network-error, :error-data {:url "http://example.com"}}

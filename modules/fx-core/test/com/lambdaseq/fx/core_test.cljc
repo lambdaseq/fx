@@ -1,4 +1,5 @@
 (ns com.lambdaseq.fx.core-test
+  (:refer-clojure :exclude [tap>])
   (:require [clojure.test :refer :all]
             [com.lambdaseq.fx.core :refer :all]))
 
@@ -97,23 +98,56 @@
                   (with-out-str))]
       (is (= "Should print" res)))))
 
-(deftest do>-test
-  (testing "do> propagates failure"
+(deftest tap>-test
+  (testing "tap> returns a valid effect"
+    (let [eff (tap> (fn [_] nil))]
+      (is (effect? eff))
+      (is (= :tap (:tag eff)))))
+  (testing "tap> propagates failure"
     (let [res (-> (fail> :test {})
-                  (do> (constantly (succeed> 1)))
+                  (tap> (constantly (succeed> 1)))
                   (run-sync!))]
       (is (failure? res))))
-  (testing "do> runs the side effect"
+  (testing "tap> runs the side effect"
     (let [res (-> (succeed> 1)
-                  (do> (fn [_] (print "Should print")))
+                  (tap> (fn [_] (print "Should print")))
                   (run-sync!)
                   (with-out-str))]
       (is (= "Should print" res))))
-  (testing "do> does not affect the value"
+  (testing "tap> does not affect the value"
     (let [res (-> (succeed> 1)
-                  (do> (fn [_] (print "Should print")))
+                  (tap> (fn [_] (print "Should print")))
                   (run-sync!))]
       (is (= 1 res)))))
+
+(deftest tap-error>-test
+  (testing "tap-error> returns a valid effect"
+    (let [eff (tap-error> (fn [_] nil))]
+      (is (effect? eff))
+      (is (= :tap-error (:tag eff)))))
+  (testing "tap-error> runs side effect on failure and receives failure object"
+    (let [caught (atom nil)
+          res (-> (fail> :not-found {:id 42})
+                  (tap-error> (fn [err] (reset! caught err)))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :not-found (:tag res)))
+      (is (= {:id 42} (error-data res)))
+      (is (= res @caught))))
+  (testing "tap-error> does not run side effect on success and preserves success value"
+    (let [called (atom false)
+          res (-> (succeed> 42)
+                  (tap-error> (fn [_] (reset! called true)))
+                  (run-sync!))]
+      (is (= 42 res))
+      (is (false? @called))))
+  (testing "tap-error alias works identically"
+    (let [called (atom false)
+          res (-> (fail> :error {:msg "boom"})
+                  (tap-error (fn [err] (reset! called (:tag err))))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :error @called)))))
 
 (deftest ensure>-test
   (testing "ensure> returns a valid effect"
@@ -123,14 +157,14 @@
   (testing "ensure> runs finalizer on success and preserves original value"
     (let [cleaned (atom false)
           res (-> (succeed> 42)
-                  (ensure> (do> (fn [_] (reset! cleaned true))))
+                  (ensure> (tap> (fn [_] (reset! cleaned true))))
                   (run-sync!))]
       (is (= 42 res))
       (is (true? @cleaned))))
   (testing "ensure> runs finalizer on failure and preserves original failure"
     (let [cleaned (atom false)
           res (-> (fail> :db-error {:code 500})
-                  (ensure> (do> (fn [_] (reset! cleaned true))))
+                  (ensure> (tap> (fn [_] (reset! cleaned true))))
                   (run-sync!))]
       (is (failure? res))
       (is (= :db-error (:tag res)))
@@ -152,7 +186,7 @@
       (is (= {:reason "disk full"} (error-data res)))))
   (testing "ensure> catches thrown exceptions in finalizer as :ensure failure"
     (let [res (-> (succeed> 42)
-                  (ensure> (do> (fn [_] (/ 1 0))))
+                  (ensure> (tap> (fn [_] (/ 1 0))))
                   (run-sync!))]
       (is (failure? res))
       (is (= :ensure (:tag res)))
@@ -166,7 +200,7 @@
       (is (true? @cleaned))))
   (testing "ensure> works standalone"
     (let [cleaned (atom false)
-          res (run-sync! (ensure> (do> (fn [_] (reset! cleaned true)))))]
+          res (run-sync! (ensure> (tap> (fn [_] (reset! cleaned true)))))]
       (is (nil? res))
       (is (true? @cleaned)))))
 
@@ -259,7 +293,7 @@
       (is (= {:msg "upstream"} (error-data res)))))
   (testing "try> evaluates side-effects on success"
     (let [res (-> (succeed> 1)
-                  (try> (do> (fn [_] (print "Should print"))))
+                  (try> (tap> (fn [_] (print "Should print"))))
                   (run-sync!)
                   (with-out-str))]
       (is (= "Should print" res)))))
@@ -274,7 +308,7 @@
     (let [res (-> (fail> :test {})
                   (mapcat> (->
                              (succeed> 10)
-                             (do> (fn [_] (print "Should not print")))))
+                             (tap> (fn [_] (print "Should not print")))))
                   (run-sync!)
                   (with-out-str))]
       (is (not= "Should not print" res))))
@@ -286,7 +320,7 @@
   (testing "mapcat> run function should evaluate on success"
     (let [res (-> (succeed> 1)
                   (mapcat> (-> (map> inc)
-                               (do> (fn [_] (print "Should print")))))
+                               (tap> (fn [_] (print "Should print")))))
                   (run-sync!)
                   (with-out-str))]
       (is (= "Should print" res)))))
@@ -312,9 +346,9 @@
     (let [res (-> (succeed> true)
                   (if> (map> true?)
                        (-> (succeed> 1)
-                           (do> (fn [_] (print "Should print"))))
+                           (tap> (fn [_] (print "Should print"))))
                        (-> (succeed> 2)
-                           (do> (fn [_] (print "Should not print")))))
+                           (tap> (fn [_] (print "Should not print")))))
                   (run-sync!)
                   (with-out-str))]
       (is (= "Should print" res))))
@@ -331,9 +365,9 @@
                   (if> (map> true?)
                        (fn [_]
                          (-> (succeed> 1)
-                             (do> (constantly (print "Should not print")))))
+                             (tap> (constantly (print "Should not print")))))
                        (-> (succeed> 2)
-                           (do> (constantly (print "Should print")))))
+                           (tap> (constantly (print "Should print")))))
                   (run-sync!)
                   (with-out-str))]
       (is (= "Should print" res)))))
@@ -377,9 +411,9 @@
       (is (= [1 2] res))))
   (testing "all> runs all side effects"
     (let [res (-> (all> [(-> (succeed> 1)
-                             (do> (fn [_] (print "Should print 1"))))
+                             (tap> (fn [_] (print "Should print 1"))))
                          (-> (succeed> 2)
-                             (do> (fn [_] (print "Should print 2"))))])
+                             (tap> (fn [_] (print "Should print 2"))))])
                   (run-sync!)
                   (with-out-str))]
       (is (= "Should print 1Should print 2" res)))))
@@ -398,7 +432,7 @@
   (testing "catchall> runs the side effect"
     (let [res (-> (fail> :test {})
                   (catchall> (-> (succeed> 1)
-                                 (do> (fn [_] (print "Should print")))))
+                                 (tap> (fn [_] (print "Should print")))))
                   (run-sync!)
                   (with-out-str))]
       (is (= "Should print" res))))
@@ -410,7 +444,7 @@
   (testing "catchall> body does not evaluate if not a failure"
     (let [res (-> (succeed> 1)
                   (catchall> (-> (succeed> 1)
-                                 (do> (fn [_] (print "Should print")))))
+                                 (tap> (fn [_] (print "Should print")))))
                   (run-sync!)
                   (with-out-str))]
       (is (not= "Should not print" res))))
@@ -431,7 +465,7 @@
   (testing "catch> runs the side effect"
     (let [res (-> (fail> :test {})
                   (catch> {:test (-> (succeed> 1)
-                                     (do> (fn [_] (print "Should print"))))})
+                                     (tap> (fn [_] (print "Should print"))))})
                   (run-sync!)
                   (with-out-str))]
       (is (= "Should print" res))))
@@ -443,7 +477,7 @@
   (testing "catch> body does not evaluate if not a failure"
     (let [res (-> (succeed> 1)
                   (catch> {:test (-> (succeed> 2)
-                                     (do> (fn [_] (print "Should print"))))})
+                                     (tap> (fn [_] (print "Should print"))))})
                   (run-sync!)
                   (with-out-str))]
       (is (not= "Should not print" res))))

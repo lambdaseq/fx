@@ -80,7 +80,7 @@
                  [in context -> out]
                  -> (fx/IEffect t/Any out failure context)])))
 
-(t/ann fx/do>
+(t/ann fx/tap>
        (t/All [[out :< t/Any]
                [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
                [context :< Context]]
@@ -89,6 +89,28 @@
                  -> (fx/IEffect out out nil Context)]
                 [(fx/IEffect t/Any out failure context)
                  [out -> t/Any]
+                 -> (fx/IEffect t/Any out failure context)])))
+
+(t/ann fx/tap-error>
+       (t/All [[out :< t/Any]
+               [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [context :< Context]]
+              (t/IFn
+                [[failure -> t/Any]
+                 -> (fx/IEffect out out failure Context)]
+                [(fx/IEffect t/Any out failure context)
+                 [failure -> t/Any]
+                 -> (fx/IEffect t/Any out failure context)])))
+
+(t/ann fx/tap-error
+       (t/All [[out :< t/Any]
+               [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [context :< Context]]
+              (t/IFn
+                [[failure -> t/Any]
+                 -> (fx/IEffect out out failure Context)]
+                [(fx/IEffect t/Any out failure context)
+                 [failure -> t/Any]
                  -> (fx/IEffect t/Any out failure context)])))
 
 (t/ann fx/do-ctx>

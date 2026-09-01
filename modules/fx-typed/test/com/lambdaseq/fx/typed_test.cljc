@@ -158,21 +158,21 @@
                :requires [[com.lambdaseq.fx.core :as fx]
                           [com.lambdaseq.fx.typed]])))
 
-(deftest do>-ann--test
-  (testing "do> returns the output type of it's previous effect"
+(deftest tap>-ann--test
+  (testing "tap> returns the output type of it's previous effect"
     (is-tc-e (-> (fx/succeed> 10)
-                 (fx/do> println))
+                 (fx/tap> println))
              (fx/IEffect t/Any Long nil '{})
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]])
     (is-tc-e (-> (fx/succeed> "string")
-                 (fx/do> println))
+                 (fx/tap> println))
              (fx/IEffect t/Any String nil '{})
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]]))
-  (testing "do> propagates failure type of previous effects"
+  (testing "tap> propagates failure type of previous effects"
     (is-tc-e (-> (fx/fail> {})
-                 (fx/do> println))
+                 (fx/tap> println))
              (fx/IEffect t/Any nil
                (fx/IFailure (t/Val :fail) (t/Val {}))
                '{})
@@ -180,8 +180,36 @@
                         [com.lambdaseq.fx.typed]])
     (is-tc-e (-> (fx/fail> {})
                  (fx/map> inc)
-                 (fx/do> println))
+                 (fx/tap> println))
              (fx/IEffect t/Any Long
+               (fx/IFailure (t/Val :fail) (t/Val {}))
+               '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest tap-error>-ann--test
+  (testing "tap-error> preserves output type of previous effect"
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/tap-error> println))
+             (fx/IEffect t/Any Long nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (-> (fx/succeed> "string")
+                 (fx/tap-error> println))
+             (fx/IEffect t/Any String nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]]))
+  (testing "tap-error> propagates failure type of previous effects"
+    (is-tc-e (-> (fx/fail> {})
+                 (fx/tap-error> println))
+             (fx/IEffect t/Any nil
+               (fx/IFailure (t/Val :fail) (t/Val {}))
+               '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (-> (fx/fail> {})
+                 (fx/tap-error println))
+             (fx/IEffect t/Any nil
                (fx/IFailure (t/Val :fail) (t/Val {}))
                '{})
              :requires [[com.lambdaseq.fx.core :as fx]
