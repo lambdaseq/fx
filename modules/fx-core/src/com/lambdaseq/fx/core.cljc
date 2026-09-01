@@ -113,6 +113,65 @@
          (f value)
          value)))))
 
+(defn- handle-try-exception [catch-handler e]
+  (cond
+    (nil? catch-handler)
+    (make-failure :try e)
+
+    (keyword? catch-handler)
+    (make-failure catch-handler e)
+
+    (effect? catch-handler)
+    (-run! (chain> (succeed> e) catch-handler))
+
+    (ifn? catch-handler)
+    (let [res (catch-handler e)]
+      (if (failure? res)
+        res
+        (make-failure :try res)))
+
+    :else
+    (make-failure :try e)))
+
+(defn try>
+  "Creates an effect that executes an inner effect combinator, capturing any thrown
+   exceptions as failures.
+
+   Supports point-free usage in threading pipelines or standalone:
+     (-> (succeed> \"10\") (try> (map> parse-long)))
+     (-> (succeed> \"abc\") (try> (map> parse-long) :parse-error))
+     (-> (succeed> \"abc\") (try> (map> parse-long) (map> (fn [e] (make-failure :parse-error (.getMessage e))))))
+     (try> (map> #(slurp \"file.txt\")))
+     (try> (map> #(slurp \"file.txt\")) :io-error)
+     (try> {:try (map> #(slurp \"file.txt\")) :catch :io-error})"
+  ([effect-or-opts]
+   (if (and (map? effect-or-opts) (contains? effect-or-opts :try))
+     (try> nil (:try effect-or-opts) (:catch effect-or-opts))
+     (try> nil effect-or-opts nil)))
+  ([a b]
+   (cond
+     (and (effect? a) (effect? b))
+     (try> a b nil)
+
+     (and (effect? a) (map? b) (contains? b :try))
+     (try> a (:try b) (:catch b))
+
+     (effect? a)
+     (try> nil a b)
+
+     :else
+     (try> nil a b)))
+  ([prev-effect body-effect catch-handler]
+   (let [eff (if (effect? body-effect) body-effect (map> body-effect))]
+     (make-effect :try
+       prev-effect
+       (fn [value]
+         (maybe-propagate-failure value
+           (try
+             (-run! (chain> (succeed> value) eff))
+             (catch #?(:clj Throwable :cljs :default) e
+               (handle-try-exception catch-handler e)))))))))
+
 (defn all>
   "Combines the effects into a single effect that returns a vector of the results of the effects."
   [effects]

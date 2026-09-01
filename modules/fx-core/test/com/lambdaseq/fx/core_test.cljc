@@ -110,6 +110,100 @@
                   (run-sync!))]
       (is (= 1 res)))))
 
+(deftest try>-test
+  (testing "try> returns a valid effect"
+    (let [eff (try> (map> inc))]
+      (is (effect? eff))
+      (is (= :try (:effect-type eff)))))
+  (testing "try> applies effect combinator to successful effect's value (point-free)"
+    (let [res (-> (succeed> 1)
+                  (try> (map> inc))
+                  (run-sync!))]
+      (is (= 2 res))))
+  (testing "try> captures thrown exceptions as failures with default :try type"
+    (let [res (-> (succeed> 0)
+                  (try> (map> #(/ 10 %)))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :try (:type res)))
+      (is (instance? #?(:clj Throwable :cljs :default) (error-data res)))))
+  (testing "try> captures thrown exceptions with custom keyword type"
+    (let [res (-> (succeed> 0)
+                  (try> (map> #(/ 10 %)) :div-zero)
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :div-zero (:type res)))
+      (is (instance? #?(:clj Throwable :cljs :default) (error-data res)))))
+  (testing "try> captures thrown exceptions with custom catch effect returning failure"
+    (let [res (-> (succeed> 0)
+                  (try> (map> #(/ 10 %)) (map> (fn [e] (make-failure :math-error {:msg #?(:clj (.getMessage e) :cljs (str e))}))))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :math-error (:type res)))
+      (is (map? (error-data res)))))
+  (testing "try> captures thrown exceptions with custom catch effect recovering with fallback value"
+    (let [res (-> (succeed> 0)
+                  (try> (map> #(/ 10 %)) (succeed> 42))
+                  (run-sync!))]
+      (is (= 42 res))))
+  (testing "try> works standalone without previous effect"
+    (let [res (run-sync! (try> (succeed> 30)))]
+      (is (= 30 res)))
+    (let [res (run-sync! (try> (map> (fn [_] (/ 1 0)))))]
+      (is (failure? res))
+      (is (= :try (:type res))))
+    (let [res (run-sync! (try> (map> (fn [_] (/ 1 0))) :div-zero))]
+      (is (failure? res))
+      (is (= :div-zero (:type res)))))
+  (testing "try> works with options map"
+    (let [res (run-sync! (try> {:try (succeed> 3) :catch :err}))]
+      (is (= 3 res)))
+    (let [res (run-sync! (try> {:try (map> (fn [_] (/ 1 0))) :catch :err}))]
+      (is (failure? res))
+      (is (= :err (:type res))))
+    (let [res (-> (succeed> 10)
+                  (try> {:try (map> (fn [x] (/ x 0))) :catch :zero-err})
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :zero-err (:type res)))))
+  (testing "try> propagates earlier failures without evaluating body effect"
+    (let [res (-> (fail> :test {:a 1})
+                  (try> (map> (fn [_]
+                                (print "Should not print")
+                                1)))
+                  (run-sync!)
+                  (with-out-str))]
+      (is (not= "Should not print" res)))
+    (let [res (-> (fail> :test {:a 1})
+                  (try> (map> inc))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :test (:type res)))
+      (is (= {:a 1} (error-data res)))))
+  (testing "try> propagates failure when the inner effect is a fail>"
+    (let [res (run-sync! (try> (fail> :inner-error {:msg "failed"})))]
+      (is (failure? res))
+      (is (= :inner-error (:type res)))
+      (is (= {:msg "failed"} (error-data res))))
+    (let [res (-> (succeed> 10)
+                  (try> (fail> :inner-error {:msg "failed"}))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :inner-error (:type res)))
+      (is (= {:msg "failed"} (error-data res))))
+    (let [res (-> (fail> :upstream-error {:msg "upstream"})
+                  (try> (fail> :inner-error {:msg "inner"}))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :upstream-error (:type res)))
+      (is (= {:msg "upstream"} (error-data res)))))
+  (testing "try> evaluates side-effects on success"
+    (let [res (-> (succeed> 1)
+                  (try> (do> (fn [_] (print "Should print"))))
+                  (run-sync!)
+                  (with-out-str))]
+      (is (= "Should print" res)))))
+
 (deftest mapcat>-test
   (testing "mapcat> propagates failure"
     (let [res (-> (fail> :test {})
