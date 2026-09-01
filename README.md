@@ -101,7 +101,7 @@ Use `tap>` for logging, metric collection, or instrumentation on the success cha
 ;; => 200
 ```
 
-Use `tap-error>` (or `tap-error>`) to inspect failures without recovering from them:
+Use `tap-error>` to inspect failures without recovering from them:
 
 ```clojure
 (-> (fx/fail> :not-found {:user-id 123})

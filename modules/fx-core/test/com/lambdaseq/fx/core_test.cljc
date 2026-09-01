@@ -140,14 +140,7 @@
                   (tap-error> (fn [_] (reset! called true)))
                   (run-sync!))]
       (is (= 42 res))
-      (is (false? @called))))
-  (testing "tap-error alias works identically"
-    (let [called (atom false)
-          res (-> (fail> :error {:msg "boom"})
-                  (tap-error (fn [err] (reset! called (:tag err))))
-                  (run-sync!))]
-      (is (failure? res))
-      (is (= :error @called)))))
+      (is (false? @called)))))
 
 (deftest ensure>-test
   (testing "ensure> returns a valid effect"
@@ -607,3 +600,249 @@
     (let [res (run-sync! (context>) {:runner :fake-runner :custom 123})]
       (is (= 123 (:custom res)))
       (is (fn? (:runner res))))))
+
+(deftest acquire-release>-test
+  (testing "successful acquire, use, and release lifecycle"
+    (let [released (atom false)
+          res (run-sync!
+                (acquire-release>
+                  (succeed> {:db "conn"})
+                  (fn [conn] (succeed> (str (:db conn) "-data")))
+                  (fn [conn] (succeed> (reset! released true)))))]
+      (is (= "conn-data" res))
+      (is (true? @released))))
+
+  (testing "release executes even when usage fails with IFailure"
+    (let [released (atom false)
+          res (run-sync!
+                (acquire-release>
+                  (succeed> {:db "conn"})
+                  (fn [_] (fail> :query-error {:code 500}))
+                  (fn [_] (succeed> (reset! released true)))))]
+      (is (failure? res))
+      (is (= :query-error (:tag res)))
+      (is (= {:code 500} (error-data res)))
+      (is (true? @released))))
+
+  (testing "release executes when usage throws an exception and rethrows exception"
+    (let [released (atom false)]
+      (is (thrown-with-msg?
+            #?(:clj Exception :cljs :default)
+            #"boom"
+            (run-sync!
+              (acquire-release>
+                (succeed> {:db "conn"})
+                (fn [_] (throw (ex-info "boom" {:error :crash})))
+                (fn [_] (succeed> (reset! released true)))))))
+      (is (true? @released))))
+
+  (testing "acquisition failure skips use and release"
+    (let [used (atom false)
+          released (atom false)
+          res (run-sync!
+                (acquire-release>
+                  (fail> :conn-failed {:reason :timeout})
+                  (fn [_] (reset! used true) (succeed> 1))
+                  (fn [_] (reset! released true) (succeed> 2))))]
+      (is (failure? res))
+      (is (= :conn-failed (:tag res)))
+      (is (false? @used))
+      (is (false? @released)))))
+
+(deftest die>-and-or-die>-test
+  (testing "die> throws unhandled defect ExceptionInfo"
+    (is (thrown-with-msg?
+          #?(:clj Exception :cljs :default)
+          #"Effect defect encountered"
+          (run-sync! (die> {:reason :fatal})))))
+
+  (testing "or-die> passes success value through untouched"
+    (let [res (-> (succeed> 42)
+                  (or-die>)
+                  (run-sync!))]
+      (is (= 42 res))))
+
+  (testing "or-die> throws ExceptionInfo when upstream is a failure"
+    (try
+      (-> (fail> :unauthorized {:user "bob"})
+          (or-die>)
+          (run-sync!))
+      (is false "Expected exception was not thrown")
+      (catch #?(:clj clojure.lang.ExceptionInfo :cljs :default) e
+        (is (= :unauthorized (:tag (ex-data e))))
+        (is (= {:user "bob"} (:error-data (ex-data e)))))))
+
+  (testing "or-die> with custom message"
+    (is (thrown-with-msg?
+          #?(:clj clojure.lang.ExceptionInfo :cljs :default)
+          #"Fatal database glitch"
+          (-> (fail> :db-down {:cluster "east"})
+              (or-die> "Fatal database glitch")
+              (run-sync!))))))
+
+(deftest try>-exception-mapping-test
+  (testing "try> maps specific exception types using map handler"
+    #?(:clj
+       (let [res (-> (try> (fn [] (throw (java.io.IOException. "disk full")))
+                           {java.io.IOException :io-failure
+                            ArithmeticException :math-failure})
+                     (run-sync!))]
+         (is (failure? res))
+         (is (= :io-failure (:tag res)))))))
+
+(deftest match>-test
+  (testing "match> converges success channel"
+    (let [res (-> (succeed> {:name "Alice"})
+                  (match>
+                    (fn [err] (str "Error: " (tag err)))
+                    (fn [user] (str "Hello " (:name user))))
+                  (run-sync!))]
+      (is (= "Hello Alice" res))))
+
+  (testing "match> converges failure channel into success value"
+    (let [res (-> (fail> :user-not-found {:id 101})
+                  (match>
+                    (fn [err] (str "Recovered from " (tag err)))
+                    (fn [val] (str "Success " val)))
+                  (run-sync!))]
+      (is (= "Recovered from :user-not-found" res)))))
+
+(deftest or-else>-test
+  (testing "or-else> runs fallback effect when upstream fails"
+    (let [res (-> (fail> :cache-miss {:key "user-1"})
+                  (or-else> (succeed> {:user "default"}))
+                  (run-sync!))]
+      (is (= {:user "default"} res))))
+
+  (testing "or-else> skips fallback effect when upstream succeeds"
+    (let [called (atom false)
+          res (-> (succeed> {:user "Alice"})
+                  (or-else> (fn [_] (reset! called true) (succeed> {:user "default"})))
+                  (run-sync!))]
+      (is (= {:user "Alice"} res))
+      (is (false? @called)))))
+
+(deftest or-else-fail>-test
+  (testing "or-else-fail> replaces failure with new tagged failure"
+    (let [res (-> (fail> :raw-sql-error {:code 1045})
+                  (or-else-fail> :auth-error {:msg "Access denied"})
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :auth-error (:tag res)))
+      (is (= {:msg "Access denied"} (error-data res)))))
+
+  (testing "or-else-fail> preserves success value"
+    (let [res (-> (succeed> 42)
+                  (or-else-fail> :auth-error {:msg "Failed"})
+                  (run-sync!))]
+      (is (= 42 res)))))
+
+(deftest retry>-test
+  (testing "retry> succeeds on subsequent attempt after transient failure"
+    (let [attempts (atom 0)
+          flaky-eff (make-effect :flaky nil
+                      (fn [_]
+                        (let [n (swap! attempts inc)]
+                          (if (< n 3)
+                            (make-failure :transient-error {:attempt n})
+                            {:status :ok :attempts n}))))
+          res (run-sync! (retry> flaky-eff {:max-attempts 4 :delay-ms 1}))]
+      (is (= {:status :ok :attempts 3} res))
+      (is (= 3 @attempts))))
+
+  (testing "retry> exhausts attempts and returns final failure"
+    (let [attempts (atom 0)
+          always-fail (make-effect :fail nil
+                        (fn [_]
+                          (swap! attempts inc)
+                          (make-failure :persistent-error {:count @attempts})))
+          res (run-sync! (retry> always-fail {:max-attempts 3 :delay-ms 1}))]
+      (is (failure? res))
+      (is (= :persistent-error (:tag res)))
+      (is (= 3 @attempts))))
+
+  (testing "retry> respects :retry-if predicate"
+    (let [attempts (atom 0)
+          selective-fail (make-effect :fail nil
+                           (fn [_]
+                             (swap! attempts inc)
+                             (make-failure :fatal-unrecoverable {})))
+          res (run-sync!
+                (retry> selective-fail
+                  {:max-attempts 5
+                   :delay-ms 1
+                   :retry-if (fn [err] (not= :fatal-unrecoverable (tag err)))}))]
+      (is (failure? res))
+      (is (= 1 @attempts)))))
+
+(deftest for-each>-test
+  (testing "for-each> maps collection and gathers results into vector"
+    (let [res (run-sync! (for-each> [1 2 3] (fn [x] (succeed> (* x 10)))))]
+      (is (= [10 20 30] res))))
+
+  (testing "for-each> short-circuits on first failure"
+    (let [evaluated (atom [])
+          res (run-sync!
+                (for-each> [1 2 3 4]
+                  (fn [x]
+                    (swap! evaluated conj x)
+                    (if (= x 2)
+                      (fail> :invalid-item {:item x})
+                      (succeed> (* x 2))))))]
+      (is (failure? res))
+      (is (= :invalid-item (:tag res)))
+      (is (= {:item 2} (error-data res)))
+      (is (= [1 2] @evaluated))))
+
+  (testing "for-each> returns empty vector on empty collection without evaluating"
+    (let [evaluated (atom false)
+          res (run-sync! (for-each> [] (fn [x] (reset! evaluated true) (succeed> x))))]
+      (is (= [] res))
+      (is (false? @evaluated)))))
+
+(deftest zip>-and-zip-with>-test
+  (testing "zip> combines two successful effects into a pair"
+    (let [res (run-sync! (zip> (succeed> :user) (succeed> [1 2 3])))]
+      (is (= [:user [1 2 3]] res))))
+
+  (testing "zip-with> applies binary function over effect results"
+    (let [res (run-sync!
+                (zip-with>
+                  (succeed> {:name "Alice"})
+                  (succeed> {:role :admin})
+                  (fn [u r] (merge u r))))]
+      (is (= {:name "Alice" :role :admin} res))))
+
+  (testing "zip> short-circuits on first effect failure"
+    (let [called-b (atom false)
+          res (run-sync!
+                (zip> (fail> :error-a {:code 1})
+                      (make-effect :b nil (fn [_] (reset! called-b true) 2))))]
+      (is (failure? res))
+      (is (= :error-a (:tag res)))
+      (is (false? @called-b))))
+
+  (testing "zip> short-circuits on second effect failure"
+    (let [res (run-sync!
+                (zip> (succeed> :ok)
+                      (fail> :error-b {:code 2})))]
+      (is (failure? res))
+      (is (= :error-b (:tag res)))))
+
+  (testing "zip> handles nil result without failure"
+    (let [res (run-sync! (zip> (succeed> nil) (succeed> 42)))]
+      (is (= [nil 42] res)))))
+
+(deftest sleep>-and-run-async!-test
+  (testing "sleep> propagates value after pause"
+    (let [res (run-sync! (-> (succeed> "hello")
+                             (sleep> 1)
+                             (map> #(str % " world"))))]
+      (is (= "hello world" res))))
+
+  (testing "run-async! asynchronously evaluates effect pipeline"
+    (let [res-future (run-async! (-> (succeed> 100)
+                                     (sleep> 1)
+                                     (map> inc)))]
+      #?(:clj  (is (= 101 (.get ^java.util.concurrent.CompletableFuture res-future)))
+         :cljs (is (some? res-future))))))

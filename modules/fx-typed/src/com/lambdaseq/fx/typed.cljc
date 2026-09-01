@@ -102,17 +102,6 @@
                  [failure -> t/Any]
                  -> (fx/IEffect t/Any out failure context)])))
 
-(t/ann fx/tap-error
-       (t/All [[out :< t/Any]
-               [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
-               [context :< Context]]
-              (t/IFn
-                [[failure -> t/Any]
-                 -> (fx/IEffect out out failure Context)]
-                [(fx/IEffect t/Any out failure context)
-                 [failure -> t/Any]
-                 -> (fx/IEffect t/Any out failure context)])))
-
 (t/ann fx/do-ctx>
        (t/All [[out :< t/Any]
                [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
@@ -309,3 +298,165 @@
                       -> (t/U out failure)]
                      [(fx/IEffect in out failure context)
                       run-ctx -> (t/U out failure)])))
+
+(t/ann fx/acquire-release>
+       (t/All [res out]
+              (t/IFn
+                [(fx/IEffect t/Any res nil Context)
+                 [res -> (fx/IEffect t/Any out nil Context)]
+                 [res -> (fx/IEffect t/Any t/Any nil Context)]
+                 -> (fx/IEffect t/Any out nil Context)]
+                [(fx/IEffect t/Any res (t/Option (fx/IFailure t/Keyword t/Any)) Context)
+                 [res -> (fx/IEffect t/Any out (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                 [res -> (fx/IEffect t/Any t/Any (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                 -> (fx/IEffect t/Any out (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                [[res -> (fx/IEffect t/Any out nil Context)]
+                 [res -> (fx/IEffect t/Any t/Any nil Context)]
+                 -> (fx/IEffect res out nil Context)]
+                [[res -> (fx/IEffect t/Any out (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                 [res -> (fx/IEffect t/Any t/Any (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                 -> (fx/IEffect res out (t/Option (fx/IFailure t/Keyword t/Any)) Context)])))
+
+(t/ann fx/die>
+       (t/IFn
+         [-> (fx/IEffect t/Any t/Nothing nil Context)]
+         [t/Any -> (fx/IEffect t/Any t/Nothing nil Context)]
+         [t/Str t/Any -> (fx/IEffect t/Any t/Nothing nil Context)]))
+
+(t/ann fx/or-die>
+       (t/All [in out
+               [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [context :< Context]]
+              (t/IFn
+                [-> (fx/IEffect in in nil Context)]
+                [(fx/IEffect in out failure context)
+                 -> (fx/IEffect in out nil context)]
+                [(fx/IEffect in out failure context)
+                 t/Any
+                 -> (fx/IEffect in out nil context)])))
+
+(t/ann fx/match>
+       (t/All [in out
+               [prev-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [on-fail-out :< t/Any]
+               [on-succ-out :< t/Any]
+               [context :< Context]]
+              (t/IFn
+                [[prev-failure -> on-fail-out]
+                 [out -> on-succ-out]
+                 -> (fx/IEffect out (t/U on-fail-out on-succ-out) nil Context)]
+                [(fx/IEffect t/Any out prev-failure context)
+                 [prev-failure -> on-fail-out]
+                 [out -> on-succ-out]
+                 -> (fx/IEffect t/Any (t/U on-fail-out on-succ-out) nil context)])))
+
+(t/ann fx/or-else>
+       (t/All [in out
+               [prev-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [fallback-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [fallback-out :< t/Any]
+               [context :< Context]]
+              (t/IFn
+                [(fx/IEffect t/Any fallback-out fallback-failure context)
+                 -> (fx/IEffect in (t/U in fallback-out) fallback-failure context)]
+                [(fx/IEffect t/Any out prev-failure context)
+                 (fx/IEffect t/Any fallback-out fallback-failure context)
+                 -> (fx/IEffect t/Any (t/U out fallback-out) fallback-failure context)])))
+
+(t/ann fx/or-else-fail>
+       (t/All [in out
+               [prev-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [key :< t/Keyword]
+               err
+               [context :< Context]]
+              (t/IFn
+                [(fx/IFailure key err)
+                 -> (fx/IEffect in in (fx/IFailure key err) Context)]
+                [key err
+                 -> (fx/IEffect in in (fx/IFailure key err) Context)]
+                [(fx/IEffect t/Any out prev-failure context)
+                 (fx/IFailure key err)
+                 -> (fx/IEffect t/Any out (fx/IFailure key err) context)]
+                [(fx/IEffect t/Any out prev-failure context)
+                 key err
+                 -> (fx/IEffect t/Any out (fx/IFailure key err) context)])))
+
+(t/ann fx/retry>
+       (t/All [in out
+               [prev-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [context :< Context]]
+              (t/IFn
+                [(t/Map t/Any t/Any)
+                 -> (fx/IEffect in out failure context)]
+                [(fx/IEffect in out failure context)
+                 (t/Map t/Any t/Any)
+                 -> (fx/IEffect in out failure context)]
+                [(fx/IEffect t/Any in prev-failure context)
+                 (fx/IEffect in out failure context)
+                 (t/Map t/Any t/Any)
+                 -> (fx/IEffect t/Any out (t/U prev-failure failure) context)])))
+
+(t/ann fx/for-each>
+       (t/All [item out]
+              (t/IFn
+                [[item -> (fx/IEffect t/Any out nil Context)]
+                 -> (fx/IEffect (t/Vec item) (t/Vec out) nil Context)]
+                [[item -> (fx/IEffect t/Any out (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                 -> (fx/IEffect (t/Vec item) (t/Vec out) (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                [(t/Vec item)
+                 [item -> (fx/IEffect t/Any out nil Context)]
+                 -> (fx/IEffect t/Any (t/Vec out) nil Context)]
+                [(t/Vec item)
+                 [item -> (fx/IEffect t/Any out (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                 -> (fx/IEffect t/Any (t/Vec out) (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                [(fx/IEffect t/Any (t/Vec item) nil Context)
+                 [item -> (fx/IEffect t/Any out nil Context)]
+                 -> (fx/IEffect t/Any (t/Vec out) nil Context)]
+                [(fx/IEffect t/Any (t/Vec item) (t/Option (fx/IFailure t/Keyword t/Any)) Context)
+                 [item -> (fx/IEffect t/Any out (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                 -> (fx/IEffect t/Any (t/Vec out) (t/Option (fx/IFailure t/Keyword t/Any)) Context)])))
+
+(t/ann fx/zip-with>
+       (t/All [out-a out-b out
+               [fail-a :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [fail-b :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [context :< Context]]
+              (t/IFn
+                [(fx/IEffect t/Any out-a fail-a context)
+                 (fx/IEffect t/Any out-b fail-b context)
+                 [out-a out-b -> out]
+                 -> (fx/IEffect t/Any out (t/U fail-a fail-b) context)])))
+
+(t/ann fx/zip>
+       (t/All [out-a out-b
+               [fail-a :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [fail-b :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [context :< Context]]
+              (t/IFn
+                [(fx/IEffect t/Any out-a fail-a context)
+                 (fx/IEffect t/Any out-b fail-b context)
+                 -> (fx/IEffect t/Any (t/HVec [out-a out-b]) (t/U fail-a fail-b) context)])))
+
+(t/ann fx/sleep>
+       (t/All [in out
+               [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [context :< Context]]
+              (t/IFn
+                [Long -> (fx/IEffect in in nil context)]
+                [(fx/IEffect in out failure context) Long
+                 -> (fx/IEffect in out failure context)])))
+
+(t/ann fx/run-async!
+       (t/All [in out
+               [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [run-ctx :< Context]
+               [context :< Context]]
+              (t/IFn [(fx/IEffect in out nil context)
+                      -> (t/U java.util.concurrent.CompletableFuture t/Any)]
+                     [(fx/IEffect in out nil context)
+                      run-ctx -> (t/U java.util.concurrent.CompletableFuture t/Any)]
+                     [(fx/IEffect in out failure context)
+                      -> (t/U java.util.concurrent.CompletableFuture t/Any)]
+                     [(fx/IEffect in out failure context)
+                      run-ctx -> (t/U java.util.concurrent.CompletableFuture t/Any)])))

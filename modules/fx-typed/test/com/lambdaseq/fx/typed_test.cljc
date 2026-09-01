@@ -1,5 +1,5 @@
 (ns com.lambdaseq.fx.typed-test
-  (:require [clojure.test :refer [deftest testing]]
+  (:require [clojure.test :refer [deftest testing is]]
             [com.lambdaseq.fx.core :as fx]
             [com.lambdaseq.fx.core]
             [com.lambdaseq.fx.typed]
@@ -202,13 +202,6 @@
   (testing "tap-error> propagates failure type of previous effects"
     (is-tc-e (-> (fx/fail> {})
                  (fx/tap-error> println))
-             (fx/IEffect t/Any nil
-               (fx/IFailure (t/Val :fail) (t/Val {}))
-               '{})
-             :requires [[com.lambdaseq.fx.core :as fx]
-                        [com.lambdaseq.fx.typed]])
-    (is-tc-e (-> (fx/fail> {})
-                 (fx/tap-error println))
              (fx/IEffect t/Any nil
                (fx/IFailure (t/Val :fail) (t/Val {}))
                '{})
@@ -515,3 +508,63 @@
              (fx/IEffect t/Any Long nil '{})
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]])))
+
+(deftest acquire-release>-ann--test
+  (testing "acquire-release> typing succeeds"
+    (is-tc-e (fx/acquire-release>
+               (fx/succeed> {:db "conn"})
+               (fn [conn] (fx/succeed> "data"))
+               (fn [conn] (fx/succeed> nil)))
+             (fx/IEffect t/Any String nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest or-die>-ann--test
+  (testing "or-die> strips failure type"
+    (is-tc-e (-> (fx/succeed> 42)
+                 (fx/or-die>))
+             (fx/IEffect t/Any Long nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest match>-ann--test
+  (testing "match> converges return types"
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/match>
+                   (fn [_err] "error")
+                   (fn [_val] "success")))
+             (fx/IEffect t/Any String nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest or-else>-ann--test
+  (testing "or-else> infers fallback type"
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/or-else> (fx/succeed> 20)))
+             (fx/IEffect t/Any Long nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest for-each>-ann--test
+  (testing "for-each> infers vector output type"
+    (is-tc-e (fx/for-each> [1 2 3] (fn [x] (fx/succeed> (str x))))
+             (fx/IEffect t/Any (t/Vec String) nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest zip>-ann--test
+  (testing "zip-with> combines types"
+    (is-tc-e (fx/zip-with> (fx/succeed> 10) (fx/succeed> "str") (fn [n s] (str s n)))
+             (fx/IEffect t/Any String nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest run-async!-runtime-test
+  (testing "run-async! executes asynchronously and yields value via CompletableFuture"
+    (let [fut (fx/run-async! (-> (fx/succeed> 10)
+                                 (fx/sleep> 10)
+                                 (fx/map> inc)))]
+      #?(:clj
+         (is (= 11 (.get ^java.util.concurrent.CompletableFuture fut)))
+         :cljs
+         (is (some? fut))))))
