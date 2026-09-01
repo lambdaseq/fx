@@ -1,104 +1,202 @@
 # com.lambdaseq/fx
 
-A Clojure library that implements a functional effect system, akin to Effect.ts, Scala's ZIO, or Haskell's IO monad.
-Using Clojure's elegant syntax and macros provides a simple and powerful way to model side effects in a pure functional
-way.
-For example composing effects can be simply done using the `->>` macro.
+A lightweight, purely functional effect system for Clojure and ClojureScript inspired by Effect-ts and ZIO.
 
-## Usage
+`fx` models synchronous computations, side effects, and failure channels as pure data structures composed with Clojure's thread-first (`->`) macro. Pipelines short-circuit automatically on failure, catch exceptions safely, and execute only when explicitly triggered.
 
-Functions in `fx` that return effects are suffixed with `>`, and functions that evaluate effects are suffixed with `!`.
-You can `require` the core namespace and use the following functions:
+## Installation
+
+Add the dependency to your `deps.edn`:
 
 ```clojure
-(ns my-ns
-  (:require [com.lambdaseq.fx :as fx]))
-
-(->> (fx/succeed> 42)
-     ; maps the value of the previous effect
-     (fx/map> inc)
-     ; maps the value of the previous effect, but returns a new effect.
-     (fx/mapcat> (fn [x] (fx/succeed> (* x 2))))
-     (run-sync!))
-;; => 86
+{:deps {com.lambdaseq/fx-core {:mvn/version "0.1.0"}}}
 ```
 
-`fx` effects short circuit on the first error, and can be used to model side effects in a pure functional way.
+For optional Typed Clojure type annotations:
 
 ```clojure
-(->> (fx/fail! :error {})
-     (fx/map> (fn [_] (println "This does not print" 42)))
-     (run-sync!))
-
-;; => #com.lambdaseq.fx.core.Failure {:data {}, :type :error}
+{:deps {com.lambdaseq/fx-typed {:mvn/version "0.1.0"}}}
 ```
 
-An elegant way to do conditionals is also provided by the following functions:
+## Quickstart
+
+Functions that create or transform effects end in `>`, and functions that execute effects end in `!`.
 
 ```clojure
-; Using the `fx/if>` function
-(->> (fx/succeed> 42)
-     (fx/if> even?
-             (constantly (fx/succeed> "even"))
-             (constantly (fx/fail> :odd {})))
-     (eval!))
-;; => "even"
-```
+(require '[com.lambdaseq.fx.core :as fx])
 
-You can also declare reusable effects using the `pipeline>>` macro:
-
-```clojure
-(def inc-twice>
-  (fx/pipeline>>
+(-> (fx/succeed> 20)
     (fx/map> inc)
-    (fx/map> inc)))
+    (fx/do> (fn [v] (println "Current value:" v)))
+    (fx/mapcat> (fx/map> (fn [v] (* v 2))))
+    (fx/run-sync!))
+;; Prints: "Current value: 21"
+;; => 42
 ```
 
-which is the same as writing:
+## Mental Model
+
+- **Effects as data**: Combinators return lazy, inspectable `Effect` records describing steps in a computation.
+- **Thread-first composition**: Effects chain naturally with standard Clojure `->` threading.
+- **Two output channels**: Pipelines yield either a success value or a typed `Failure` record.
+- **Automatic short-circuiting**: On failure, downstream `map>`, `mapcat>`, and `do>` steps are skipped automatically.
+- **Explicit execution**: Pipelines stay inert until evaluated with `run-sync!`.
+
+## API Overview
+
+| Function | Signature | Description |
+| --- | --- | --- |
+| `succeed>` | `[val]` | Creates a successful effect yielding `val`. |
+| `fail>` | `([failure] [type data])` | Creates a failed effect holding a typed `Failure`. |
+| `map>` | `([f] [eff f])` | Transforms successful values with function `f`. |
+| `mapcat>` | `([inner-eff] [eff inner-eff])` | Flat-maps over an effect with an effect combinator. |
+| `do>` | `([f] [eff f])` | Executes side-effect `f` and passes the value through unchanged. |
+| `try>` | `([eff] [eff catch] [prev eff catch])` | Catches thrown exceptions and converts them to typed failures. |
+| `if>` | `([cond-eff then-eff else-eff] ...)` | Branches execution based on a predicate effect. |
+| `cond>` | `([eff & test-expr-pairs])` | Multi-branch conditional evaluating test-expression pairs. |
+| `all>` | `[effects]` | Evaluates a vector of independent effects and collects results. |
+| `catch>` | `([f-map] [eff f-map])` | Recovers from specific failures using a `{type-key handler}` map. |
+| `catchall>` | `([inner-eff] [eff inner-eff])` | Recovers from any failure by passing failure map to `inner-eff`. |
+| `chain>` | `[prev-eff current-eff]` | Links two effects into a sequential chain. |
+| `run-sync!` | `[eff]` | Synchronously executes an effect pipeline and returns value or failure. |
+
+## Guide & Examples
+
+### Creating Effects & Error Propagation
+
+Effects are constructed using `succeed>` or `fail>`. Upstream failures short-circuit downstream transformations without executing them:
 
 ```clojure
-(defn inc-twice> [x]
-  (->> x
-       (fx/map> inc)
-       (fx/map> inc)))
+;; Success
+(-> (fx/succeed> 10)
+    (fx/map> inc)
+    (fx/run-sync!))
+;; => 11
+
+;; Short-circuiting failure
+(-> (fx/fail> :not-found {:user-id 123})
+    (fx/map> inc)
+    (fx/run-sync!))
+;; => #com.lambdaseq.fx.core.Failure{:type :not-found, :error-data {:user-id 123}}
 ```
 
-### Handling Errors
+### Side Effects with `do>`
 
-You can handle errors using the `fx/catch>` function:
+Use `do>` for logging, metric collection, or instrumentation. The original value is preserved:
 
 ```clojure
-(->> (fx/fail! :error {:value 42})
-     (fx/catch>
-       {:error (fn [{:keys [value]}] (fx/succeed> value))})
-     (run-sync!))
-;; => "error"
+(-> (fx/succeed> {:status 200})
+    (fx/do> (fn [res] (println "Response received:" res)))
+    (fx/map> :status)
+    (fx/run-sync!))
+;; Prints: "Response received: {:status 200}"
+;; => 200
 ```
 
-or catch all errors using the `fx/catchall>` function:
+### Exception Safety with `try>`
+
+`try>` wraps operations that may throw host exceptions (JVM `Throwable` or JS error) and converts them into structured `Failure` records:
 
 ```clojure
-(->> (fx/fail! :error {:value 42})
-     (fx/catchall>
-       (fn [e] (fx/succeed> (str "Caught error: " e))))
-     (run-sync!))
-;; => "Caught error: #com.lambdaseq.fx.core.Failure {:data {:value 42}, :type :error}"
+;; Default failure type (:try)
+(-> (fx/succeed> "invalid-number")
+    (fx/try> (fx/map> parse-long))
+    (fx/run-sync!))
+;; => #com.lambdaseq.fx.core.Failure{:type :try, :error-data #error ...}
+
+;; Custom failure keyword
+(-> (fx/succeed> "invalid-number")
+    (fx/try> (fx/map> parse-long) :parse-error)
+    (fx/run-sync!))
+;; => #com.lambdaseq.fx.core.Failure{:type :parse-error, :error-data #error ...}
+
+;; Fallback recovery effect
+(-> (fx/succeed> "invalid-number")
+    (fx/try> (fx/map> parse-long) (fx/succeed> 0))
+    (fx/run-sync!))
+;; => 0
+
+;; Standalone or options map form
+(fx/run-sync! (fx/try> {:try (fx/map> #(slurp "non-existent.txt")) :catch :io-error}))
+;; => #com.lambdaseq.fx.core.Failure{:type :io-error, :error-data #error ...}
 ```
 
-## Future Goals
+### Branching: `if>` and `cond>`
 
-We intend to add the following features in the future:
+Conditional combinators take effect combinators for predicates and branches:
 
-- [ ] Different runtimes and run strategies (similar to Effect.ts or ZIO's `Runtime`).
-- [ ] Build a suite of concurrency and parallelism primitives on top of `fx`.
-- [ ] Build helpers for common Clojure libraries that use side
-  effects ([ring](https://github.com/ring-clojure/ring)/[pedestal](https://github.com/pedestal/pedestal), [next.jdbc](https://github.com/seancorfield/next-jdbc),
-  etc), and extend them potentially into a full webstack.
-- [ ] Build a suite of monitoring and tracing tools using `fx` primitives.
-- [ ] Integrate with [typedclojure](https://typedclojure.org/), for a complete type safe effect system.
+```clojure
+;; Binary branching with if>
+(-> (fx/succeed> 10)
+    (fx/if> (fx/map> even?)
+            (fx/succeed> "even number")
+            (fx/succeed> "odd number"))
+    (fx/run-sync!))
+;; => "even number"
+
+;; Multi-branch with cond>
+(-> (fx/succeed> 15)
+    (fx/cond>
+      (fx/map> #(zero? (mod % 15))) (fx/succeed> "FizzBuzz")
+      (fx/map> #(zero? (mod % 3)))  (fx/succeed> "Fizz")
+      (fx/map> #(zero? (mod % 5)))  (fx/succeed> "Buzz"))
+    (fx/run-sync!))
+;; => "FizzBuzz"
+```
+
+### Batching with `all>`
+
+`all>` runs a vector of independent effects and aggregates their values into a vector:
+
+```clojure
+(-> (fx/all> [(fx/succeed> "a")
+              (fx/succeed> "b")
+              (fx/succeed> "c")])
+    (fx/run-sync!))
+;; => ["a" "b" "c"]
+```
+
+### Error Handling & Recovery
+
+Recover from failures using `catch>` for specific error types or `catchall>` for any error:
+
+```clojure
+;; Pattern match on specific failure types (passes error-data to handler)
+(-> (fx/fail> :user-not-found {:id 42})
+    (fx/catch>
+      {:user-not-found (fx/map> (fn [{:keys [id]}] {:id id :name "Guest"}))
+       :db-timeout     (fx/succeed> {:id 0 :name "Fallback"})})
+    (fx/run-sync!))
+;; => {:id 42, :name "Guest"}
+
+;; Catch any failure (passes {:type ... :error-data ...} map to handler)
+(-> (fx/fail> :service-unavailable {:retry-after 30})
+    (fx/catchall>
+      (fx/map> (fn [{:keys [type error-data]}]
+                 (str "Handled error " type " (retry in " (:retry-after error-data) "s)"))))
+    (fx/run-sync!))
+;; => "Handled error :service-unavailable (retry in 30s)"
+```
+
+## Typed Clojure Integration
+
+`fx-typed` provides complete type signatures for Typed Clojure. Effect channels and variance are fully tracked:
+
+```clojure
+(ns my-app.core
+  (:require [com.lambdaseq.fx.core :as fx]
+            [com.lambdaseq.fx.typed]
+            [typed.clojure :as t]))
+
+;; (fx/IEffect In Out Failure Context)
+(t/ann calculate-total (fx/IEffect t/Any Long (t/Option (fx/IFailure (t/Val :calc-err) t/Any)) '{}))
+(def calculate-total
+  (-> (fx/succeed> 10)
+      (fx/try> (fx/map> inc) :calc-err)))
+```
 
 ## License
 
-Copyright © 2024 [LambdaSeq Works LTD.](lambdaseq.com),
+Copyright © 2024 LambdaSeq Works LTD.
 
 Distributed under the Eclipse Public License version 1.0.

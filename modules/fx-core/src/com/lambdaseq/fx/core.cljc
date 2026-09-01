@@ -1,12 +1,13 @@
 (ns com.lambdaseq.fx.core)
 
 (defprotocol IEffect
+  "Protocol representing an executable effect in a computation pipeline."
   (-eval! [this v]
-    "Evaluates the run function of the effect and returns the result.")
+    "Evaluates the run function of the effect with input value `v` and returns the result.")
   (effect-type [this]
-    "Returns the type of the effect.")
+    "Returns the keyword identifying the type of the effect (e.g. :succeed, :fail, :map, :try).")
   (prev-effect [this]
-    "Returns the next effect in the chain."))
+    "Returns the upstream (previous) effect in the chain, or nil if this is the root."))
 
 (defrecord Effect [effect-type prev-effect run]
   IEffect
@@ -15,10 +16,11 @@
   (effect-type [_] effect-type))
 
 (defprotocol IFailure
+  "Protocol representing a typed failure in the effect system."
   (failure-type [this]
-    "Returns the type of the failure.")
+    "Returns the keyword type of the failure.")
   (error-data [this]
-    "Returns the error data of the failure."))
+    "Returns the error payload/data of the failure."))
 
 (defrecord Failure
   [type error-data]
@@ -26,40 +28,44 @@
   (failure-type [_] type)
   (error-data [_] error-data))
 
-(defn chain> [prev-effect current-effect]
+(defn chain>
+  "Chains `current-effect` onto `prev-effect` by setting `prev-effect` as its upstream dependency."
+  [prev-effect current-effect]
   (assoc current-effect :prev-effect prev-effect))
 
-(def ^:dynamic *context* {})
+(def ^:dynamic *context*
+  "Dynamic map holding execution context and runtime state (e.g. :runner)."
+  {})
 
 (defn- -run!
-  "Helper function for running using the current runner"
+  "Helper function for running an effect using the current runner in *context*."
   [effect]
   (let [{:keys [runner]} *context*]
     (runner effect)))
 
 (defn effect?
-  "Returns true if the value is an effect."
+  "Returns true if `x` implements IEffect or is an instance of Effect."
   [x]
   (instance? Effect x))
 
 (defn failure?
-  "Returns true if the value is a failure."
+  "Returns true if `x` implements IFailure or is an instance of Failure."
   [x]
   (instance? Failure x))
 
 (defn make-effect
-  "Given a type keyword, a next effect, and a run function, returns a new effect."
+  "Creates a new Effect record given an `effect-type` keyword, an upstream `prev-effect` (or nil),
+   and a single-argument execution function `run`."
   [type prev-effect run]
   (Effect. type prev-effect run))
 
 (defn make-failure
-  "Given a type keyword and an error map, returns a new failure."
+  "Creates a new Failure record given a `type` keyword and an `err` payload map or value."
   [type err]
   (Failure. type err))
 
 (defmacro maybe-propagate-failure
-  "If the value is an effect, then returns it, otherwise evaluates the body.
-  Useful for propagating failures in effects that handle only values."
+  "If `v` is a failure, short-circuits and returns `v` directly. Otherwise evaluates `body`."
   [v & body]
   `(let [v# ~v]
      (if (failure? v#)
@@ -67,29 +73,40 @@
        (do ~@body))))
 
 (defmacro maybe-propagate-effect
-  "If the value is an effect, then returns it, otherwise evaluates the body.
-  Useful for propagating effects, in effects that handle only failures."
+  "If `v` is an effect, returns `v` directly. Otherwise evaluates `body`."
   [v & body]
   `(let [v# ~v]
      (if (effect? v#)
        v#
        (do ~@body))))
 
-(defn succeed> [value]
-  "Creates a successful effect that just returns the value."
+(defn succeed>
+  "Creates a successful effect yielding `value`.
+
+   Example:
+     (fx/succeed> 42)"
+  [value]
   (make-effect :succeed nil (fn [_] value)))
 
 (defn fail>
-  "Creates a failed effect. Takes a failure or a type and an error to be wrapped in a failure,
-   and returns a new effect."
+  "Creates a failed effect. Accepts either an existing IFailure instance, or a `type` keyword
+   and an `error-data` payload.
+
+   Examples:
+     (fx/fail> (fx/make-failure :not-found {:id 10}))
+     (fx/fail> :not-found {:id 10})"
   ([failure]
    (make-effect :fail nil (constantly failure)))
   ([type error-data]
    (make-effect :fail nil (constantly (make-failure type error-data)))))
 
 (defn map>
-  "Maps over the effect. Takes a function f and/or an effect,
-   and returns a new effect."
+  "Maps a pure function `f` over the successful value of an effect.
+   Short-circuits if the upstream effect yielded a failure.
+
+   Supports point-free pipeline usage:
+     (-> (fx/succeed> 10)
+         (fx/map> inc))"
   ([f]
    (map> nil f))
   ([prev-effect f]
@@ -100,9 +117,14 @@
          (f value))))))
 
 (defn do>
-  "Runs the effect and propagates the value to the next effect.
-  Useful for running side effects, and making sure the input is passed to the next effect,
-  like logging, or updating a database."
+  "Executes a side-effecting function `f` on the successful value (e.g. logging or metrics)
+   and propagates the original value unchanged to the next effect in the pipeline.
+   Short-circuits if the upstream effect yielded a failure.
+
+   Example:
+     (-> (fx/succeed> 10)
+         (fx/do> #(println \"Current value:\" %))
+         (fx/map> inc))"
   ([f]
    (do> nil f))
   ([prev-effect f]
@@ -134,10 +156,11 @@
     (make-failure :try e)))
 
 (defn try>
-  "Creates an effect that executes an inner effect combinator, capturing any thrown
-   exceptions as failures.
+  "Creates an effect that executes an inner effect combinator, catching any thrown
+   exceptions (Throwable on Clojure, :default on ClojureScript) and converting them into typed failures.
 
-   Supports point-free usage in threading pipelines or standalone:
+   Supports point-free pipeline usage, standalone evaluation, custom keyword failure types,
+   custom catch effect/function handlers, and options maps:
      (-> (succeed> \"10\") (try> (map> parse-long)))
      (-> (succeed> \"abc\") (try> (map> parse-long) :parse-error))
      (-> (succeed> \"abc\") (try> (map> parse-long) (map> (fn [e] (make-failure :parse-error (.getMessage e))))))
@@ -173,7 +196,13 @@
                (handle-try-exception catch-handler e)))))))))
 
 (defn all>
-  "Combines the effects into a single effect that returns a vector of the results of the effects."
+  "Combines a vector or sequence of independent effects into a single effect that returns
+   a vector of their evaluated results.
+
+   Example:
+     (fx/all> [(fx/succeed> 1)
+               (fx/succeed> 2)])
+     ;; => [1 2]"
   [effects]
   (make-effect
     :all
@@ -183,8 +212,12 @@
            (mapv (fn [eff] (-eval! eff nil)))))))
 
 (defn mapcat>
-  "Flat maps over the effect. Takes a function f that returns an effect and/or an effect,
-   and returns a new effect."
+  "Flat-maps over an effect by applying an inner effect combinator to the successful value.
+   Short-circuits if the upstream effect yielded a failure.
+
+   Example:
+     (-> (fx/succeed> 10)
+         (fx/mapcat> (fx/map> inc)))"
   ([inner-effect]
    (mapcat> nil inner-effect))
   ([prev-effect inner-effect]
@@ -200,9 +233,15 @@
                          {:result inner-effect})))))))
 
 (defn if>
-  "If the condition is true,
-     then returns the `then` effect,
-     otherwise returns the `else` effect."
+  "Conditional branching combinator. Evaluates `cond-eff` with the current value:
+   if truthy, evaluates `then-effect`; otherwise evaluates `else-effect`.
+   Short-circuits if the upstream effect yielded a failure.
+
+   Example:
+     (-> (fx/succeed> 10)
+         (fx/if> (fx/map> even?)
+                 (fx/map> inc)
+                 (fx/map> dec)))"
   ([cond-eff then-effect else-effect]
    (if> nil cond-eff then-effect else-effect))
   ([prev-effect cond-eff then-effect else-effect]
@@ -218,13 +257,19 @@
                           branch-eff))))))))
 
 (defn cond>
-  "Evaluates
-  the conditions in order until one of them returns true,
-   then returns the effect associated with that condition.
-   Conditions are test and expr pairs. tests are functions that take the result of the previous effect,
-   and exprs are functions that take the result of the previous effect and return effects.
+  "Multi-branch conditional combinator. Takes paired test and expression effects:
+   `[prev-effect test-1 expr-1 test-2 expr-2 ...]`.
+   Evaluates tests in order with the current value; when a test evaluates to a truthy
+   value, executes the corresponding expression effect.
 
-   If no conditions are met, then returns a failure."
+   If no test matches, returns a Failure with type `:cond` and error-data `:no-conditions`.
+   Short-circuits if the upstream effect yielded a failure.
+
+   Example:
+     (-> (fx/succeed> 10)
+         (fx/cond>
+           (fx/map> odd?)  (fx/map> inc)
+           (fx/map> even?) (fx/map> dec)))"
   [prev-effect & conditions]
   (let [conditions (partition 2 conditions)]
     (make-effect :cond
@@ -242,8 +287,13 @@
                            res-eff))))))))
 
 (defn catch>
-  "Dispatches the failure to the provided handler based on the failure type.
-   The functions should receive the failure `data` and return an effect."
+  "Catches specific failure types using a handler map `f-map` of `{failure-type-keyword handler-effect}`.
+   When a failure matches a key in `f-map`, executes the corresponding handler effect passing the
+   failure's `error-data` as input. Unmatched failures and successful values pass through untouched.
+
+   Example:
+     (-> (fx/fail> :not-found {:id 42})
+         (fx/catch> {:not-found (fx/map> (fn [{:keys [id]}] (str \"User \" id \" missing\")))}))"
   ([f-map]
    (catch> nil f-map))
   ([prev-effect f-map]
@@ -262,14 +312,18 @@
          value)))))
 
 (defn failure->value
-  "Converts a IFailure object to a plain map"
+  "Converts an IFailure instance into a plain map `{:type ... :error-data ...}`."
   [failure]
   {:type       (failure-type failure)
    :error-data (error-data failure)})
 
 (defn catchall>
-  "Catches all failures and runs the provided function.
-  The function should receive the failure and return an effect."
+  "Catches any failure and routes its map representation `{:type ... :error-data ...}` as input
+   to `inner-effect`. Successful values pass through untouched.
+
+   Example:
+     (-> (fx/fail> :error {:code 500})
+         (fx/catchall> (fx/map> (fn [{:keys [type error-data]}] (str \"Caught: \" type))))))"
   ([inner-effect]
    (catchall> nil inner-effect))
   ([prev-effect inner-effect]
@@ -282,7 +336,12 @@
          value)))))
 
 (defn run-sync!
-  "Evaluates the effect and returns the result."
+  "Synchronously evaluates an effect pipeline from root to leaf and returns the final value
+   or failure. Binds `*context*` with `:runner run-sync!` during execution.
+
+   Example:
+     (fx/run-sync! (fx/succeed> 42))
+     ;; => 42"
   [effect]
   (binding [*context* (assoc *context* :runner run-sync!)]
     (->> effect
