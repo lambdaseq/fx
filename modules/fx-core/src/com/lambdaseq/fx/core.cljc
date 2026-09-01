@@ -939,9 +939,7 @@
   ([effect context]
    #?(:clj
       (CompletableFuture/supplyAsync
-        (reify Supplier
-          (get [_]
-            (run-sync! effect context))))
+        #(run-sync! effect context))
       :cljs
       (js/Promise.
         (fn [resolve reject]
