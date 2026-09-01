@@ -47,7 +47,7 @@ Functions that create or transform effects end in `>`, and functions that execut
 | Function | Signature | Description |
 | --- | --- | --- |
 | `succeed>` | `[val]` | Creates a successful effect yielding `val`. |
-| `fail>` | `([failure] [type data])` | Creates a failed effect holding a typed `Failure`. |
+| `fail>` | `([failure] [tag data])` | Creates a failed effect holding a typed `Failure`. |
 | `map>` | `([f] [eff f])` | Transforms successful values with unary function `f`. |
 | `map-ctx>` | `([f] [eff f])` | Transforms successful values with binary function `(f val context)`. |
 | `mapcat>` | `([inner-eff] [eff inner-eff])` | Flat-maps over an effect with an effect combinator. |
@@ -62,7 +62,7 @@ Functions that create or transform effects end in `>`, and functions that execut
 | `if>` | `([cond-eff then-eff else-eff] ...)` | Branches execution based on a predicate effect. |
 | `cond>` | `([eff & test-expr-pairs])` | Multi-branch conditional evaluating test-expression pairs. |
 | `all>` | `[effects]` | Evaluates a vector of independent effects and collects results. |
-| `catch>` | `([f-map] [eff f-map])` | Recovers from specific failures using a `{type-key handler}` map. |
+| `catch>` | `([f-map] [eff f-map])` | Recovers from specific failures using a `{tag-key handler}` map. |
 | `catchall>` | `([inner-eff] [eff inner-eff])` | Recovers from any failure by passing failure map to `inner-eff`. |
 | `chain>` | `[prev-eff current-eff]` | Links two effects into a sequential chain. |
 | `run-sync!` | `([eff] [eff context])` | Evaluates an effect pipeline with optional initial context. |
@@ -84,7 +84,7 @@ Effects are constructed using `succeed>` or `fail>`. Upstream failures short-cir
 (-> (fx/fail> :not-found {:user-id 123})
     (fx/map> inc)
     (fx/run-sync!))
-;; => #com.lambdaseq.fx.core.Failure{:type :not-found, :error-data {:user-id 123}}
+;; => #com.lambdaseq.fx.core.Failure{:tag :not-found, :error-data {:user-id 123}}
 ```
 
 ### Side Effects with `do>`
@@ -117,7 +117,7 @@ Use `do>` for logging, metric collection, or instrumentation. The original value
     (fx/ensure> (fx/do> (fn [_] (println "Closing connection..."))))
     (fx/run-sync!))
 ;; Prints: "Closing connection..."
-;; => #com.lambdaseq.fx.core.Failure{:type :network-error, :error-data {:url "http://example.com"}}
+;; => #com.lambdaseq.fx.core.Failure{:tag :network-error, :error-data {:url "http://example.com"}}
 ```
 
 ### Exception Safety with `try>`
@@ -125,17 +125,17 @@ Use `do>` for logging, metric collection, or instrumentation. The original value
 `try>` wraps operations that may throw host exceptions (JVM `Throwable` or JS error) and converts them into structured `Failure` records:
 
 ```clojure
-;; Default failure type (:try)
+;; Default failure tag (:try)
 (-> (fx/succeed> "invalid-number")
     (fx/try> (fx/map> parse-long))
     (fx/run-sync!))
-;; => #com.lambdaseq.fx.core.Failure{:type :try, :error-data #error ...}
+;; => #com.lambdaseq.fx.core.Failure{:tag :try, :error-data #error ...}
 
 ;; Custom failure keyword
 (-> (fx/succeed> "invalid-number")
     (fx/try> (fx/map> parse-long) :parse-error)
     (fx/run-sync!))
-;; => #com.lambdaseq.fx.core.Failure{:type :parse-error, :error-data #error ...}
+;; => #com.lambdaseq.fx.core.Failure{:tag :parse-error, :error-data #error ...}
 
 ;; Fallback recovery effect
 (-> (fx/succeed> "invalid-number")
@@ -145,7 +145,7 @@ Use `do>` for logging, metric collection, or instrumentation. The original value
 
 ;; Standalone or options map form
 (fx/run-sync! (fx/try> {:try (fx/map> #(slurp "non-existent.txt")) :catch :io-error}))
-;; => #com.lambdaseq.fx.core.Failure{:type :io-error, :error-data #error ...}
+;; => #com.lambdaseq.fx.core.Failure{:tag :io-error, :error-data #error ...}
 ```
 
 ### Branching: `if>` and `cond>`
@@ -185,10 +185,10 @@ Conditional combinators take effect combinators for predicates and branches:
 
 ### Error Handling & Recovery
 
-Recover from failures using `catch>` for specific error types or `catchall>` for any error:
+Recover from failures using `catch>` for specific error tags or `catchall>` for any error:
 
 ```clojure
-;; Pattern match on specific failure types (passes error-data to handler)
+;; Pattern match on specific failure tags (passes error-data to handler)
 (-> (fx/fail> :user-not-found {:id 42})
     (fx/catch>
       {:user-not-found (fx/map> (fn [{:keys [id]}] {:id id :name "Guest"}))
@@ -196,11 +196,11 @@ Recover from failures using `catch>` for specific error types or `catchall>` for
     (fx/run-sync!))
 ;; => {:id 42, :name "Guest"}
 
-;; Catch any failure (passes {:type ... :error-data ...} map to handler)
+;; Catch any failure (passes {:tag ... :error-data ...} map to handler)
 (-> (fx/fail> :service-unavailable {:retry-after 30})
     (fx/catchall>
-      (fx/map> (fn [{:keys [type error-data]}]
-                 (str "Handled error " type " (retry in " (:retry-after error-data) "s)"))))
+      (fx/map> (fn [{:keys [tag error-data]}]
+                 (str "Handled error " tag " (retry in " (:retry-after error-data) "s)"))))
     (fx/run-sync!))
 ;; => "Handled error :service-unavailable (retry in 30s)"
 ```

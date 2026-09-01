@@ -302,7 +302,7 @@
 (deftest failure->value-ann--test
   (testing "failure->value converts an IFailure to a map"
     (is-tc-e (fx/failure->value (fx/make-failure :test {:a 1}))
-             (t/HMap :mandatory {:type (t/Val :test)
+             (t/HMap :mandatory {:tag (t/Val :test)
                                  :error-data (t/HMap :mandatory {:a (t/Val 1)})})
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]])))

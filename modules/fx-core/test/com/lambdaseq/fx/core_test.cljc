@@ -7,8 +7,9 @@
         eff (make-effect :test nil run)]
     (testing "Return value of make-effect is a valid effect"
       (is (effect? eff)))
-    (testing "Effect type is correct"
-      (is (= :test (:effect-type eff))))
+    (testing "Effect tag is correct"
+      (is (= :test (:tag eff)))
+      (is (= :test (tag eff))))
     (testing "Effect run function is correct"
       (is (= 1 (run-sync! eff))))))
 
@@ -17,8 +18,9 @@
         fail (make-failure :test err-data)]
     (testing "Return value of make-failure is a valid failure"
       (is (failure? fail)))
-    (testing "Failure type is correct"
-      (is (= :test (:type fail))))
+    (testing "Failure tag is correct"
+      (is (= :test (:tag fail)))
+      (is (= :test (tag fail))))
     (testing "Failure data is correct"
       (is (= err-data (error-data fail))))))
 
@@ -46,8 +48,9 @@
   (let [eff (succeed> 1)]
     (testing "Return value is a valid effect"
       (is (effect? eff)))
-    (testing "Effect type is correct"
-      (is (= :succeed (:effect-type eff))))
+    (testing "Effect tag is correct"
+      (is (= :succeed (:tag eff)))
+      (is (= :succeed (tag eff))))
     (testing "Effect run function is correct"
       (is (= 1 (run-sync! eff))))))
 
@@ -56,12 +59,14 @@
         eff (fail> :test err-data)]
     (testing "Return value of fail> is a valid effect"
       (is (effect? eff)))
-    (testing "Effect type is correct"
-      (is (= :fail (:effect-type eff))))
+    (testing "Effect tag is correct"
+      (is (= :fail (:tag eff)))
+      (is (= :fail (tag eff))))
     (testing "Effect run function returns a failure"
       (let [res (run-sync! eff)]
         (is (failure? res))
-        (is (= :test (:type (run-sync! eff))))
+        (is (= :test (:tag (run-sync! eff))))
+        (is (= :test (tag (run-sync! eff))))
         (is (= err-data (error-data (run-sync! eff))))))))
 
 (deftest map>-test
@@ -114,7 +119,7 @@
   (testing "ensure> returns a valid effect"
     (let [eff (ensure> (succeed> :cleaned))]
       (is (effect? eff))
-      (is (= :ensure (:effect-type eff)))))
+      (is (= :ensure (:tag eff)))))
   (testing "ensure> runs finalizer on success and preserves original value"
     (let [cleaned (atom false)
           res (-> (succeed> 42)
@@ -128,7 +133,7 @@
                   (ensure> (do> (fn [_] (reset! cleaned true))))
                   (run-sync!))]
       (is (failure? res))
-      (is (= :db-error (:type res)))
+      (is (= :db-error (:tag res)))
       (is (= {:code 500} (error-data res)))
       (is (true? @cleaned))))
   (testing "ensure> propagates finalizer failure when upstream succeeds"
@@ -136,21 +141,21 @@
                   (ensure> (fail> :cleanup-failed {:reason "disk full"}))
                   (run-sync!))]
       (is (failure? res))
-      (is (= :cleanup-failed (:type res)))
+      (is (= :cleanup-failed (:tag res)))
       (is (= {:reason "disk full"} (error-data res)))))
   (testing "ensure> propagates finalizer failure when upstream fails"
     (let [res (-> (fail> :orig-error {:orig 1})
                   (ensure> (fail> :cleanup-failed {:reason "disk full"}))
                   (run-sync!))]
       (is (failure? res))
-      (is (= :cleanup-failed (:type res)))
+      (is (= :cleanup-failed (:tag res)))
       (is (= {:reason "disk full"} (error-data res)))))
   (testing "ensure> catches thrown exceptions in finalizer as :ensure failure"
     (let [res (-> (succeed> 42)
                   (ensure> (do> (fn [_] (/ 1 0))))
                   (run-sync!))]
       (is (failure? res))
-      (is (= :ensure (:type res)))
+      (is (= :ensure (:tag res)))
       (is (instance? #?(:clj Throwable :cljs :default) (error-data res)))))
   (testing "ensure> accepts plain function as finalizer"
     (let [cleaned (atom false)
@@ -169,7 +174,7 @@
   (testing "try> returns a valid effect"
     (let [eff (try> (map> inc))]
       (is (effect? eff))
-      (is (= :try (:effect-type eff)))))
+      (is (= :try (:tag eff)))))
   (testing "try> applies effect combinator to successful effect's value (point-free)"
     (let [res (-> (succeed> 1)
                   (try> (map> inc))
@@ -180,21 +185,21 @@
                   (try> (map> #(/ 10 %)))
                   (run-sync!))]
       (is (failure? res))
-      (is (= :try (:type res)))
+      (is (= :try (:tag res)))
       (is (instance? #?(:clj Throwable :cljs :default) (error-data res)))))
   (testing "try> captures thrown exceptions with custom keyword type"
     (let [res (-> (succeed> 0)
                   (try> (map> #(/ 10 %)) :div-zero)
                   (run-sync!))]
       (is (failure? res))
-      (is (= :div-zero (:type res)))
+      (is (= :div-zero (:tag res)))
       (is (instance? #?(:clj Throwable :cljs :default) (error-data res)))))
   (testing "try> captures thrown exceptions with custom catch effect returning failure"
     (let [res (-> (succeed> 0)
                   (try> (map> #(/ 10 %)) (map> (fn [e] (make-failure :math-error {:msg #?(:clj (.getMessage e) :cljs (str e))}))))
                   (run-sync!))]
       (is (failure? res))
-      (is (= :math-error (:type res)))
+      (is (= :math-error (:tag res)))
       (is (map? (error-data res)))))
   (testing "try> captures thrown exceptions with custom catch effect recovering with fallback value"
     (let [res (-> (succeed> 0)
@@ -206,21 +211,21 @@
       (is (= 30 res)))
     (let [res (run-sync! (try> (map> (fn [_] (/ 1 0)))))]
       (is (failure? res))
-      (is (= :try (:type res))))
+      (is (= :try (:tag res))))
     (let [res (run-sync! (try> (map> (fn [_] (/ 1 0))) :div-zero))]
       (is (failure? res))
-      (is (= :div-zero (:type res)))))
+      (is (= :div-zero (:tag res)))))
   (testing "try> works with options map"
     (let [res (run-sync! (try> {:try (succeed> 3) :catch :err}))]
       (is (= 3 res)))
     (let [res (run-sync! (try> {:try (map> (fn [_] (/ 1 0))) :catch :err}))]
       (is (failure? res))
-      (is (= :err (:type res))))
+      (is (= :err (:tag res))))
     (let [res (-> (succeed> 10)
                   (try> {:try (map> (fn [x] (/ x 0))) :catch :zero-err})
                   (run-sync!))]
       (is (failure? res))
-      (is (= :zero-err (:type res)))))
+      (is (= :zero-err (:tag res)))))
   (testing "try> propagates earlier failures without evaluating body effect"
     (let [res (-> (fail> :test {:a 1})
                   (try> (map> (fn [_]
@@ -233,24 +238,24 @@
                   (try> (map> inc))
                   (run-sync!))]
       (is (failure? res))
-      (is (= :test (:type res)))
+      (is (= :test (:tag res)))
       (is (= {:a 1} (error-data res)))))
   (testing "try> propagates failure when the inner effect is a fail>"
     (let [res (run-sync! (try> (fail> :inner-error {:msg "failed"})))]
       (is (failure? res))
-      (is (= :inner-error (:type res)))
+      (is (= :inner-error (:tag res)))
       (is (= {:msg "failed"} (error-data res))))
     (let [res (-> (succeed> 10)
                   (try> (fail> :inner-error {:msg "failed"}))
                   (run-sync!))]
       (is (failure? res))
-      (is (= :inner-error (:type res)))
+      (is (= :inner-error (:tag res)))
       (is (= {:msg "failed"} (error-data res))))
     (let [res (-> (fail> :upstream-error {:msg "upstream"})
                   (try> (fail> :inner-error {:msg "inner"}))
                   (run-sync!))]
       (is (failure? res))
-      (is (= :upstream-error (:type res)))
+      (is (= :upstream-error (:tag res)))
       (is (= {:msg "upstream"} (error-data res)))))
   (testing "try> evaluates side-effects on success"
     (let [res (-> (succeed> 1)
@@ -411,7 +416,7 @@
       (is (not= "Should not print" res))))
   (testing "catchall> body is a function that takes the failure"
     (let [res (-> (fail> :test {:num 1})
-                  (catchall> (if> (map> (comp #{:test} :type))
+                  (catchall> (if> (map> (comp #{:test} :tag))
                                   (map> (comp :num :error-data))
                                   (succeed> 10)))
                   (run-sync!))]
@@ -498,7 +503,7 @@
                   (map-ctx> (fn [v ctx] (assoc v :tax (:tax ctx))))
                   (run-sync! {:tax 10}))]
       (is (failure? res))
-      (is (= :err (:type res))))))
+      (is (= :err (:tag res))))))
 
 (deftest do-ctx>-test
   (testing "do-ctx> performs side-effect with context and passes value through unchanged"
@@ -541,7 +546,7 @@
                   (provide> {:foo :bar})
                   (run-sync!))]
       (is (failure? res))
-      (is (= :inner-error (:type res)))))
+      (is (= :inner-error (:tag res)))))
   (testing "provide> passes through input value in pipeline"
     (let [res (-> (succeed> 10)
                   (provide> (map-ctx> (fn [v ctx] (* v (:multiplier ctx)))) {:multiplier 4})

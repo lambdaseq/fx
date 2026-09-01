@@ -2,32 +2,35 @@
 
 (declare run-sync!)
 
+(defprotocol ITagged
+  "Protocol representing a tagged data structure in the effect system."
+  (tag [this]
+    "Returns the keyword identifying the tag (e.g. effect tag or failure tag)."))
+
 (defprotocol IEffect
   "Protocol representing an executable effect in a computation pipeline."
   (-eval! [this v]
     "Evaluates the run function of the effect with input value `v` and returns the result.")
-  (effect-type [this]
-    "Returns the keyword identifying the type of the effect (e.g. :succeed, :fail, :map, :try).")
   (prev-effect [this]
     "Returns the upstream (previous) effect in the chain, or nil if this is the root."))
 
-(defrecord Effect [effect-type prev-effect run]
+(defrecord Effect [tag prev-effect run]
+  ITagged
+  (tag [_] tag)
   IEffect
   (-eval! [_ v] (run v))
-  (prev-effect [_] prev-effect)
-  (effect-type [_] effect-type))
+  (prev-effect [_] prev-effect))
 
 (defprotocol IFailure
   "Protocol representing a typed failure in the effect system."
-  (failure-type [this]
-    "Returns the keyword type of the failure.")
   (error-data [this]
     "Returns the error payload/data of the failure."))
 
 (defrecord Failure
-  [type error-data]
+  [tag error-data]
+  ITagged
+  (tag [_] tag)
   IFailure
-  (failure-type [_] type)
   (error-data [_] error-data))
 
 (defn chain>
@@ -56,15 +59,15 @@
   (instance? Failure x))
 
 (defn make-effect
-  "Creates a new Effect record given an `effect-type` keyword, an upstream `prev-effect` (or nil),
+  "Creates a new Effect record given a `tag` keyword, an upstream `prev-effect` (or nil),
    and a single-argument execution function `run`."
-  [type prev-effect run]
-  (Effect. type prev-effect run))
+  [tag prev-effect run]
+  (Effect. tag prev-effect run))
 
 (defn make-failure
-  "Creates a new Failure record given a `type` keyword and an `err` payload map or value."
-  [type err]
-  (Failure. type err))
+  "Creates a new Failure record given a `tag` keyword and an `err` payload map or value."
+  [tag err]
+  (Failure. tag err))
 
 (defmacro maybe-propagate-failure
   "If `v` is a failure, short-circuits and returns `v` directly. Otherwise evaluates `body`."
@@ -91,7 +94,7 @@
   (make-effect :succeed nil (fn [_] value)))
 
 (defn fail>
-  "Creates a failed effect. Accepts either an existing IFailure instance, or a `type` keyword
+  "Creates a failed effect. Accepts either an existing IFailure instance, or a `tag` keyword
    and an `error-data` payload.
 
    Examples:
@@ -99,8 +102,8 @@
      (fx/fail> :not-found {:id 10})"
   ([failure]
    (make-effect :fail nil (constantly failure)))
-  ([type error-data]
-   (make-effect :fail nil (constantly (make-failure type error-data)))))
+  ([tag error-data]
+   (make-effect :fail nil (constantly (make-failure tag error-data)))))
 
 (defn map>
   "Maps a pure function `f` over the successful value of an effect.
@@ -416,7 +419,7 @@
    Evaluates tests in order with the current value; when a test evaluates to a truthy
    value, executes the corresponding expression effect.
 
-   If no test matches, returns a Failure with type `:cond` and error-data `:no-conditions`.
+   If no test matches, returns a Failure with tag `:cond` and error-data `:no-conditions`.
    Short-circuits if the upstream effect yielded a failure.
 
    Example:
@@ -441,7 +444,7 @@
                            res-eff))))))))
 
 (defn catch>
-  "Catches specific failure types using a handler map `f-map` of `{failure-type-keyword handler-effect}`.
+  "Catches specific failure tags using a handler map `f-map` of `{failure-tag handler-effect}`.
    When a failure matches a key in `f-map`, executes the corresponding handler effect passing the
    failure's `error-data` as input. Unmatched failures and successful values pass through untouched.
 
@@ -455,9 +458,9 @@
      prev-effect
      (fn [value]
        (if (failure? value)
-         (let [failure-type (failure-type value)
+         (let [failure-tag (tag value)
                error-data (error-data value)
-               f-effect (get f-map failure-type)]
+               f-effect (get f-map failure-tag)]
            (if f-effect
              ; maybe it should be (f value)
              (-run! (chain> (succeed> error-data)
@@ -466,18 +469,18 @@
          value)))))
 
 (defn failure->value
-  "Converts an IFailure instance into a plain map `{:type ... :error-data ...}`."
+  "Converts an IFailure instance into a plain map `{:tag ... :error-data ...}`."
   [failure]
-  {:type       (failure-type failure)
+  {:tag        (tag failure)
    :error-data (error-data failure)})
 
 (defn catchall>
-  "Catches any failure and routes its map representation `{:type ... :error-data ...}` as input
+  "Catches any failure and routes its map representation `{:tag ... :error-data ...}` as input
    to `inner-effect`. Successful values pass through untouched.
 
    Example:
      (-> (fx/fail> :error {:code 500})
-         (fx/catchall> (fx/map> (fn [{:keys [type error-data]}] (str \"Caught: \" type))))))"
+         (fx/catchall> (fx/map> (fn [{:keys [tag error-data]}] (str \"Caught: \" tag))))))"
   ([inner-effect]
    (catchall> nil inner-effect))
   ([prev-effect inner-effect]

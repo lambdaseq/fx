@@ -4,17 +4,17 @@
 
 (t/defalias Context '{})
 
-(t/ann-protocol [[failure-type :< t/Keyword :variance :covariant]
+(t/ann-protocol [[failure-tag :< t/Keyword :variance :covariant]
                  [error :variance :covariant]] fx/IFailure
-  -failure-type [(fx/IFailure failure-type error) -> failure-type]
-  -error [(fx/IFailure failure-type error) -> error])
+  -error [(fx/IFailure failure-tag error) -> error])
+
+(t/ann-protocol [[tag :< t/Keyword :variance :covariant]] fx/ITagged
+  -tag [(fx/ITagged tag) -> tag])
 
 (t/ann-protocol [[in :variance :contravariant]
                  [out :variance :covariant]
                  [failure :< (t/Option (fx/IFailure t/Keyword t/Any)) :variance :covariant]
                  [context :< Context :variance :covariant]] fx/IEffect
-  -effect-type [(fx/IEffect in out failure context)
-                -> t/Keyword]
   -prev-effect [(fx/IEffect in out failure context) -> (t/Option (fx/IEffect t/Any in failure Context))]
   -eval! [(fx/IEffect in out failure context)
           -> out])
@@ -39,7 +39,7 @@
 (t/ann fx/failure->value
        (t/All [[key :< t/Keyword] error]
               [(fx/IFailure key error)
-               -> (t/HMap :mandatory {:type key :error-data error})]))
+               -> (t/HMap :mandatory {:tag key :error-data error})]))
 
 (t/ann fx/chain>
        (t/All [in out
@@ -251,15 +251,15 @@
 
 (t/ann fx/catch>
        (t/All [in out
-               [failure-type :< t/Keyword]
+               [failure-tag :< t/Keyword]
                error
                [handler-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
                [context :< Context]]
               (t/IFn
-                [(t/Map failure-type (fx/IEffect error out handler-failure context))
+                [(t/Map failure-tag (fx/IEffect error out handler-failure context))
                  -> (fx/IEffect in (t/U in out) handler-failure context)]
-                [(fx/IEffect t/Any in (fx/IFailure failure-type error) context)
-                 (t/Map failure-type (fx/IEffect error out handler-failure context))
+                [(fx/IEffect t/Any in (fx/IFailure failure-tag error) context)
+                 (t/Map failure-tag (fx/IEffect error out handler-failure context))
                  -> (fx/IEffect t/Any (t/U in out) handler-failure context)])))
 
 (t/ann fx/catchall>
@@ -268,10 +268,10 @@
                [handler-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
                [context :< Context]]
               (t/IFn
-                [(fx/IEffect (t/HMap :mandatory {:type t/Keyword :error-data t/Any}) out handler-failure context)
+                [(fx/IEffect (t/HMap :mandatory {:tag t/Keyword :error-data t/Any}) out handler-failure context)
                  -> (fx/IEffect in (t/U in out) handler-failure context)]
                 [(fx/IEffect t/Any in prev-failure context)
-                 (fx/IEffect (t/HMap :mandatory {:type t/Keyword :error-data t/Any}) out handler-failure context)
+                 (fx/IEffect (t/HMap :mandatory {:tag t/Keyword :error-data t/Any}) out handler-failure context)
                  -> (fx/IEffect t/Any (t/U in out) handler-failure context)])))
 
 (t/ann fx/run-sync!
