@@ -110,6 +110,61 @@
                   (run-sync!))]
       (is (= 1 res)))))
 
+(deftest ensure>-test
+  (testing "ensure> returns a valid effect"
+    (let [eff (ensure> (succeed> :cleaned))]
+      (is (effect? eff))
+      (is (= :ensure (:effect-type eff)))))
+  (testing "ensure> runs finalizer on success and preserves original value"
+    (let [cleaned (atom false)
+          res (-> (succeed> 42)
+                  (ensure> (do> (fn [_] (reset! cleaned true))))
+                  (run-sync!))]
+      (is (= 42 res))
+      (is (true? @cleaned))))
+  (testing "ensure> runs finalizer on failure and preserves original failure"
+    (let [cleaned (atom false)
+          res (-> (fail> :db-error {:code 500})
+                  (ensure> (do> (fn [_] (reset! cleaned true))))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :db-error (:type res)))
+      (is (= {:code 500} (error-data res)))
+      (is (true? @cleaned))))
+  (testing "ensure> propagates finalizer failure when upstream succeeds"
+    (let [res (-> (succeed> 42)
+                  (ensure> (fail> :cleanup-failed {:reason "disk full"}))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :cleanup-failed (:type res)))
+      (is (= {:reason "disk full"} (error-data res)))))
+  (testing "ensure> propagates finalizer failure when upstream fails"
+    (let [res (-> (fail> :orig-error {:orig 1})
+                  (ensure> (fail> :cleanup-failed {:reason "disk full"}))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :cleanup-failed (:type res)))
+      (is (= {:reason "disk full"} (error-data res)))))
+  (testing "ensure> catches thrown exceptions in finalizer as :ensure failure"
+    (let [res (-> (succeed> 42)
+                  (ensure> (do> (fn [_] (/ 1 0))))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :ensure (:type res)))
+      (is (instance? #?(:clj Throwable :cljs :default) (error-data res)))))
+  (testing "ensure> accepts plain function as finalizer"
+    (let [cleaned (atom false)
+          res (-> (succeed> "hello")
+                  (ensure> (fn [_] (reset! cleaned true)))
+                  (run-sync!))]
+      (is (= "hello" res))
+      (is (true? @cleaned))))
+  (testing "ensure> works standalone"
+    (let [cleaned (atom false)
+          res (run-sync! (ensure> (do> (fn [_] (reset! cleaned true)))))]
+      (is (nil? res))
+      (is (true? @cleaned)))))
+
 (deftest try>-test
   (testing "try> returns a valid effect"
     (let [eff (try> (map> inc))]

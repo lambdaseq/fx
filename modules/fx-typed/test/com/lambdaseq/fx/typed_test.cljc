@@ -187,6 +187,41 @@
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]])))
 
+(deftest ensure>-ann--test
+  (testing "ensure> returns the output type of its previous effect"
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/ensure> (fx/succeed> :cleaned)))
+             (fx/IEffect t/Any Long (t/Option (fx/IFailure (t/Val :ensure) t/Any)) '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/ensure> println))
+             (fx/IEffect t/Any Long (t/Option (fx/IFailure (t/Val :ensure) t/Any)) '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (-> (fx/succeed> "str")
+                 (fx/ensure> (fx/succeed> 123)))
+             (fx/IEffect t/Any String (t/Option (fx/IFailure (t/Val :ensure) t/Any)) '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]]))
+  (testing "ensure> propagates failure types from previous and finalizer effects"
+    (is-tc-e (-> (fx/fail> :upstream)
+                 (fx/ensure> (fx/succeed> :cleaned)))
+             (fx/IEffect t/Any nil
+               (t/Option (t/U (fx/IFailure (t/Val :fail) (t/Val :upstream))
+                              (fx/IFailure (t/Val :ensure) t/Any)))
+               '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/ensure> (fx/fail> :cleanup)))
+             (fx/IEffect t/Any Long
+               (t/Option (t/U (fx/IFailure (t/Val :fail) (t/Val :cleanup))
+                              (fx/IFailure (t/Val :ensure) t/Any)))
+               '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
 (deftest try>-ann--test
   (testing "try> returns an effect with output and failure inferred"
     (is-tc-e (fx/try> (fx/map> inc))

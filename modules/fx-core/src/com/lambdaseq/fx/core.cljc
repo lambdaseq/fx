@@ -135,6 +135,43 @@
          (f value)
          value)))))
 
+(defn ensure>
+  "Executes a `finalizer-effect` guaranteed after the previous effect completes,
+   regardless of whether the previous effect succeeded or failed.
+
+   If the upstream effect succeeds, the finalizer runs and the original successful
+   value is returned (unless the finalizer itself fails).
+   If the upstream effect fails, the finalizer runs and the original failure
+   is returned (unless the finalizer itself fails).
+
+   Supports point-free pipeline usage:
+     (-> (fx/succeed> 10)
+         (fx/ensure> (fx/do> (fn [_] (println \"Cleanup\")))))
+
+     (-> (fx/fail> :not-found {:id 42})
+         (fx/ensure> (fx/do> (fn [_] (println \"Cleanup\")))))"
+  ([finalizer-effect]
+   (ensure> nil finalizer-effect))
+  ([prev-effect finalizer-effect]
+   (let [eff (if (effect? finalizer-effect)
+               finalizer-effect
+               (do> finalizer-effect))]
+     (make-effect :ensure
+       prev-effect
+       (fn [value]
+         (let [fin-input (if (failure? value) nil value)
+               fin-eff (if (nil? (:prev-effect eff))
+                         (chain> (succeed> fin-input) eff)
+                         eff)
+               fin-res (try
+                         (-run! fin-eff)
+                         (catch #?(:clj Throwable :cljs :default) e
+                           (make-failure :ensure e)))]
+           (cond
+             (failure? fin-res) fin-res
+             (failure? value)   value
+             :else              value)))))))
+
 (defn- handle-try-exception [catch-handler e]
   (cond
     (nil? catch-handler)

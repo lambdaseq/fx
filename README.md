@@ -51,6 +51,7 @@ Functions that create or transform effects end in `>`, and functions that execut
 | `map>` | `([f] [eff f])` | Transforms successful values with function `f`. |
 | `mapcat>` | `([inner-eff] [eff inner-eff])` | Flat-maps over an effect with an effect combinator. |
 | `do>` | `([f] [eff f])` | Executes side-effect `f` and passes the value through unchanged. |
+| `ensure>` | `([finalizer-eff] [eff finalizer-eff])` | Guaranteed finalizer that executes on success or failure. |
 | `try>` | `([eff] [eff catch] [prev eff catch])` | Catches thrown exceptions and converts them to typed failures. |
 | `if>` | `([cond-eff then-eff else-eff] ...)` | Branches execution based on a predicate effect. |
 | `cond>` | `([eff & test-expr-pairs])` | Multi-branch conditional evaluating test-expression pairs. |
@@ -91,6 +92,26 @@ Use `do>` for logging, metric collection, or instrumentation. The original value
     (fx/run-sync!))
 ;; Prints: "Response received: {:status 200}"
 ;; => 200
+```
+
+### Guaranteed Finalization with `ensure>`
+
+`ensure>` executes a finalizer effect (or function) after the upstream pipeline completes, guaranteed to run whether the preceding steps succeeded or failed:
+
+```clojure
+;; Finalizer runs on success; original value is preserved
+(-> (fx/succeed> "data")
+    (fx/ensure> (fx/do> (fn [_] (println "Cleaning up resources..."))))
+    (fx/run-sync!))
+;; Prints: "Cleaning up resources..."
+;; => "data"
+
+;; Finalizer runs on failure; original failure is preserved
+(-> (fx/fail> :network-error {:url "http://example.com"})
+    (fx/ensure> (fx/do> (fn [_] (println "Closing connection..."))))
+    (fx/run-sync!))
+;; Prints: "Closing connection..."
+;; => #com.lambdaseq.fx.core.Failure{:type :network-error, :error-data {:url "http://example.com"}}
 ```
 
 ### Exception Safety with `try>`

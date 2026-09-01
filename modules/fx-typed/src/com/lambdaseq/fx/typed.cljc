@@ -70,7 +70,7 @@
                  -> (fx/IEffect t/Any out failure context)])))
 
 (t/ann fx/do>
-       (t/All [out
+       (t/All [[out :< t/Any]
                [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
                [context :< Context]]
               (t/IFn
@@ -79,6 +79,24 @@
                 [(fx/IEffect t/Any out failure context)
                  [out -> t/Any]
                  -> (fx/IEffect t/Any out failure context)])))
+
+(t/ann fx/ensure>
+       (t/All [[out :< t/Any]
+               [finalizer-out :< t/Any]
+               [prev-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [finalizer-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [context :< Context]]
+              (t/IFn
+                [(fx/IEffect t/Any finalizer-out finalizer-failure context)
+                 -> (fx/IEffect t/Any t/Any (t/U finalizer-failure (fx/IFailure (t/Val :ensure) t/Any)) context)]
+                [(fx/IEffect t/Any out prev-failure context)
+                 (fx/IEffect t/Any finalizer-out finalizer-failure context)
+                 -> (fx/IEffect t/Any out (t/U prev-failure finalizer-failure (fx/IFailure (t/Val :ensure) t/Any)) context)]
+                [[out -> t/Any]
+                 -> (fx/IEffect out out (t/Option (fx/IFailure (t/Val :ensure) t/Any)) Context)]
+                [(fx/IEffect t/Any out prev-failure context)
+                 [out -> t/Any]
+                 -> (fx/IEffect t/Any out (t/U prev-failure (fx/IFailure (t/Val :ensure) t/Any)) context)])))
 
 (t/ann fx/try>
        (t/All [[in :< t/Any]
