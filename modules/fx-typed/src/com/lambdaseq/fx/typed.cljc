@@ -69,6 +69,17 @@
                  [in -> out]
                  -> (fx/IEffect t/Any out failure context)])))
 
+(t/ann fx/map-ctx>
+       (t/All [in out
+               [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [context :< Context]]
+              (t/IFn
+                [[in context -> out]
+                 -> (fx/IEffect in out nil Context)]
+                [(fx/IEffect t/Any in failure context)
+                 [in context -> out]
+                 -> (fx/IEffect t/Any out failure context)])))
+
 (t/ann fx/do>
        (t/All [[out :< t/Any]
                [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
@@ -79,6 +90,66 @@
                 [(fx/IEffect t/Any out failure context)
                  [out -> t/Any]
                  -> (fx/IEffect t/Any out failure context)])))
+
+(t/ann fx/do-ctx>
+       (t/All [[out :< t/Any]
+               [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [context :< Context]]
+              (t/IFn
+                [[out context -> t/Any]
+                 -> (fx/IEffect out out nil Context)]
+                [(fx/IEffect t/Any out failure context)
+                 [out context -> t/Any]
+                 -> (fx/IEffect t/Any out failure context)])))
+
+(t/ann fx/context>
+       (t/All [out [context :< Context]]
+              (t/IFn
+                [-> (fx/IEffect t/Any context nil context)]
+                [t/Any -> (fx/IEffect t/Any out nil context)]
+                [t/Any out -> (fx/IEffect t/Any out nil context)])))
+
+(t/ann fx/service>
+       (t/All [out [context :< Context]]
+              (t/IFn
+                [t/Any -> (fx/IEffect t/Any out nil context)]
+                [t/Any out -> (fx/IEffect t/Any out nil context)])))
+
+(t/ann fx/provide>
+       (t/All [in out
+               [prev-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [body-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [provided-ctx :< Context]
+               [context :< Context]]
+              (t/IFn
+                [provided-ctx
+                 -> (fx/IEffect t/Any t/Any nil context)]
+                [(fx/IEffect in out body-failure context)
+                 provided-ctx
+                 -> (fx/IEffect in out body-failure context)]
+                [provided-ctx
+                 (fx/IEffect in out body-failure context)
+                 -> (fx/IEffect in out body-failure context)]
+                [(fx/IEffect t/Any in prev-failure context)
+                 (fx/IEffect in out body-failure context)
+                 provided-ctx
+                 -> (fx/IEffect t/Any out (t/U prev-failure body-failure) context)])))
+
+(t/ann fx/provide-service>
+       (t/All [in out
+               [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [key :< t/Keyword]
+               service-impl
+               [context :< Context]]
+              (t/IFn
+                [key service-impl
+                 -> (fx/IEffect t/Any t/Any nil context)]
+                [(fx/IEffect in out failure context)
+                 key service-impl
+                 -> (fx/IEffect in out failure context)]
+                [key service-impl
+                 (fx/IEffect in out failure context)
+                 -> (fx/IEffect in out failure context)])))
 
 (t/ann fx/ensure>
        (t/All [[out :< t/Any]
@@ -206,12 +277,13 @@
 (t/ann fx/run-sync!
        (t/All [in out
                [failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
+               [run-ctx :< Context]
                [context :< Context]]
               (t/IFn [(fx/IEffect in out nil context)
                       -> out]
                      [(fx/IEffect in out nil context)
-                      in -> out]
+                      run-ctx -> out]
                      [(fx/IEffect in out failure context)
                       -> (t/U out failure)]
                      [(fx/IEffect in out failure context)
-                      in -> (t/U out failure)])))
+                      run-ctx -> (t/U out failure)])))

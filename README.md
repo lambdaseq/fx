@@ -48,9 +48,15 @@ Functions that create or transform effects end in `>`, and functions that execut
 | --- | --- | --- |
 | `succeed>` | `[val]` | Creates a successful effect yielding `val`. |
 | `fail>` | `([failure] [type data])` | Creates a failed effect holding a typed `Failure`. |
-| `map>` | `([f] [eff f])` | Transforms successful values with function `f`. |
+| `map>` | `([f] [eff f])` | Transforms successful values with unary function `f`. |
+| `map-ctx>` | `([f] [eff f])` | Transforms successful values with binary function `(f val context)`. |
 | `mapcat>` | `([inner-eff] [eff inner-eff])` | Flat-maps over an effect with an effect combinator. |
 | `do>` | `([f] [eff f])` | Executes side-effect `f` and passes the value through unchanged. |
+| `do-ctx>` | `([f] [eff f])` | Executes side-effect `(f val context)` and passes value unchanged. |
+| `context>` | `([] [key] [key default])` | Yields the active execution context map or a key value. |
+| `service>` | `([key] [key default])` | Extracts a service dependency from the active context. |
+| `provide>` | `([ctx] [eff ctx] [eff body ctx])` | Executes effects within a scoped context map. |
+| `provide-service>` | `([k v] [eff k v] [k v eff])` | Injects a single service key-value pair into context. |
 | `ensure>` | `([finalizer-eff] [eff finalizer-eff])` | Guaranteed finalizer that executes on success or failure. |
 | `try>` | `([eff] [eff catch] [prev eff catch])` | Catches thrown exceptions and converts them to typed failures. |
 | `if>` | `([cond-eff then-eff else-eff] ...)` | Branches execution based on a predicate effect. |
@@ -59,7 +65,7 @@ Functions that create or transform effects end in `>`, and functions that execut
 | `catch>` | `([f-map] [eff f-map])` | Recovers from specific failures using a `{type-key handler}` map. |
 | `catchall>` | `([inner-eff] [eff inner-eff])` | Recovers from any failure by passing failure map to `inner-eff`. |
 | `chain>` | `[prev-eff current-eff]` | Links two effects into a sequential chain. |
-| `run-sync!` | `[eff]` | Synchronously executes an effect pipeline and returns value or failure. |
+| `run-sync!` | `([eff] [eff context])` | Evaluates an effect pipeline with optional initial context. |
 
 ## Guide & Examples
 
@@ -197,6 +203,70 @@ Recover from failures using `catch>` for specific error types or `catchall>` for
                  (str "Handled error " type " (retry in " (:retry-after error-data) "s)"))))
     (fx/run-sync!))
 ;; => "Handled error :service-unavailable (retry in 30s)"
+```
+
+### Dependency Injection & Context Provision
+
+`fx` provides first-class dependency injection and environmental context propagation without mutable singletons or global state.
+
+#### 1. Consuming Dependencies with `service>` and `context>`
+
+Effects can access dependencies (database connections, HTTP clients, configuration maps) directly from the execution context:
+
+```clojure
+(defn fetch-user [user-id]
+  (-> (fx/service> :db)
+      (fx/mapcat> (fn [db]
+                    (fx/try> (fx/map> (fn [_] ((:query db) "SELECT * FROM users WHERE id = ?" user-id))))))))
+```
+
+#### 2. Context-Aware Transformations with `map-ctx>` and `do-ctx>`
+
+When an operation needs both the pipeline's current value and active context simultaneously, use `map-ctx>` or `do-ctx>` with a 2-argument callback `(f value context)`:
+
+```clojure
+(-> (fx/succeed> {:amount 100})
+    (fx/map-ctx> (fn [order {:keys [tax-rate]}]
+                   (assoc order :total (* (:amount order) (inc (or tax-rate 0))))))
+    (fx/do-ctx> (fn [order {:keys [logger]}]
+                  (when logger (logger (str "Calculated order total: " (:total order))))))
+    (fx/run-sync! {:tax-rate 0.15 :logger println}))
+;; Prints: "Calculated order total: 115.0"
+;; => {:amount 100, :total 115.0}
+```
+
+#### 3. Scoped Dependency Injection with `provide>` and `provide-service>`
+
+`provide>` and `provide-service>` scope context maps or individual services to an effect tree, ideal for test mocking and isolation:
+
+```clojure
+(def mock-db
+  {:query (fn [_sql id] {:id id :name "Test User"})})
+
+;; Pipeline executes with injected mock dependency
+(-> (fetch-user 42)
+    (fx/provide> {:db mock-db})
+    (fx/run-sync!))
+;; => {:id 42, :name "Test User"}
+
+;; Single-service helper
+(-> (fetch-user 42)
+    (fx/provide-service> :db mock-db)
+    (fx/run-sync!))
+;; => {:id 42, :name "Test User"}
+```
+
+#### 4. Running with Production Environment Context
+
+Supply production dependencies at the application boundary using `run-sync!`:
+
+```clojure
+(def prod-context
+  {:db (create-connection-pool db-config)
+   :logger (create-logger)
+   :env :prod})
+
+(fx/run-sync! (fetch-user 42) prod-context)
 ```
 
 ## Typed Clojure Integration

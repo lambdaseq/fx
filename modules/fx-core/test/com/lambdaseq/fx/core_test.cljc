@@ -452,3 +452,119 @@
                   (catch> {:test (map> #(update % :a inc))})
                   (run-sync!))]
       (is (= {:a 2} res)))))
+
+(deftest context>-test
+  (testing "context> returns the active context map"
+    (let [res (run-sync! (context>) {:env :prod :timeout 3000})]
+      (is (= :prod (:env res)))
+      (is (= 3000 (:timeout res)))
+      (is (fn? (:runner res)))))
+  (testing "context> extracts key from context"
+    (let [res (run-sync! (context> :env) {:env :prod})]
+      (is (= :prod res))))
+  (testing "context> returns default value when key is absent"
+    (let [res (run-sync! (context> :missing :default))]
+      (is (= :default res))))
+  (testing "context> integrates into pipeline"
+    (let [res (-> (context> :multiplier 2)
+                  (map> (fn [m] (* 10 m)))
+                  (run-sync! {:multiplier 5}))]
+      (is (= 50 res)))))
+
+(deftest service>-test
+  (testing "service> extracts service from context"
+    (let [mock-db {:query (fn [] [{:id 1}])}
+          res (run-sync! (service> :db) {:db mock-db})]
+      (is (= mock-db res))))
+  (testing "service> returns default value when service is missing"
+    (let [res (run-sync! (service> :cache :no-cache))]
+      (is (= :no-cache res))))
+  (testing "service> pipeline consumption"
+    (let [mock-db {:find-user (fn [id] {:id id :name "Alice"})}
+          res (-> (service> :db)
+                  (map> (fn [db] ((:find-user db) 42)))
+                  (run-sync! {:db mock-db}))]
+      (is (= {:id 42 :name "Alice"} res)))))
+
+(deftest map-ctx>-test
+  (testing "map-ctx> accesses both value and context"
+    (let [res (-> (succeed> {:amount 100})
+                  (map-ctx> (fn [order {:keys [tax-rate]}]
+                              (assoc order :total (* (:amount order) (inc tax-rate)))))
+                  (run-sync! {:tax-rate 0.2}))]
+      (is (= {:amount 100 :total 120.0} res))))
+  (testing "map-ctx> propagates upstream failure"
+    (let [res (-> (fail> :err {:code 500})
+                  (map-ctx> (fn [v ctx] (assoc v :tax (:tax ctx))))
+                  (run-sync! {:tax 10}))]
+      (is (failure? res))
+      (is (= :err (:type res))))))
+
+(deftest do-ctx>-test
+  (testing "do-ctx> performs side-effect with context and passes value through unchanged"
+    (let [logs (atom [])
+          res (-> (succeed> 42)
+                  (do-ctx> (fn [v {:keys [logger]}]
+                             (logger (str "Value was " v))))
+                  (map> inc)
+                  (run-sync! {:logger (fn [msg] (swap! logs conj msg))}))]
+      (is (= 43 res))
+      (is (= ["Value was 42"] @logs))))
+  (testing "do-ctx> propagates upstream failure without evaluating fn"
+    (let [called (atom false)
+          res (-> (fail> :err {})
+                  (do-ctx> (fn [_ _] (reset! called true)))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (false? @called)))))
+
+(deftest provide>-test
+  (testing "provide> injects context map into upstream effect"
+    (let [pipeline (-> (service> :db)
+                       (map> (fn [db] (:db-name db))))
+          res (-> pipeline
+                  (provide> {:db {:db-name "analytics"}})
+                  (run-sync!))]
+      (is (= "analytics" res))))
+  (testing "provide> direct construction (provide> context eff)"
+    (let [pipeline (-> (service> :api-key)
+                       (map> clojure.string/upper-case))
+          res (run-sync! (provide> {:api-key "secret"} pipeline))]
+      (is (= "SECRET" res))))
+  (testing "provide> scopes context without leaking to outer context"
+    (let [inner (-> (service> :scope)
+                    (provide> {:scope :inner}))
+          res (run-sync! (all> [inner (service> :scope :outer)]))]
+      (is (= [:inner :outer] res))))
+  (testing "provide> propagates failure from within provided effect"
+    (let [res (-> (fail> :inner-error {:msg "boom"})
+                  (provide> {:foo :bar})
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :inner-error (:type res)))))
+  (testing "provide> passes through input value in pipeline"
+    (let [res (-> (succeed> 10)
+                  (provide> (map-ctx> (fn [v ctx] (* v (:multiplier ctx)))) {:multiplier 4})
+                  (run-sync!))]
+      (is (= 40 res)))))
+
+(deftest provide-service>-test
+  (testing "provide-service> injects single key-value dependency in pipeline"
+    (let [res (-> (service> :db)
+                  (provide-service> :db {:conn "postgres://localhost"})
+                  (run-sync!))]
+      (is (= {:conn "postgres://localhost"} res))))
+  (testing "provide-service> direct construction (provide-service> key val eff)"
+    (let [eff (-> (service> :multiplier)
+                  (map> (fn [m] (* 5 m))))
+          res (run-sync! (provide-service> :multiplier 10 eff))]
+      (is (= 50 res)))))
+
+(deftest run-sync!-context-test
+  (testing "run-sync! initializes execution with context map"
+    (let [res (run-sync! (service> :env) {:env :staging})]
+      (is (= :staging res))))
+  (testing "run-sync! preserves :runner and prevents runner override"
+    (let [res (run-sync! (context>) {:runner :fake-runner :custom 123})]
+      (is (= 123 (:custom res)))
+      (is (fn? (:runner res))))))

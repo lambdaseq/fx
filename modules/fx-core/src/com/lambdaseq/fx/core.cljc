@@ -1,5 +1,7 @@
 (ns com.lambdaseq.fx.core)
 
+(declare run-sync!)
+
 (defprotocol IEffect
   "Protocol representing an executable effect in a computation pipeline."
   (-eval! [this v]
@@ -40,7 +42,7 @@
 (defn- -run!
   "Helper function for running an effect using the current runner in *context*."
   [effect]
-  (let [{:keys [runner]} *context*]
+  (let [runner (get *context* :runner run-sync!)]
     (runner effect)))
 
 (defn effect?
@@ -116,6 +118,23 @@
        (maybe-propagate-failure value
          (f value))))))
 
+(defn map-ctx>
+  "Maps a binary function `(f value context)` over the successful value and active context.
+   Short-circuits if the upstream effect yielded a failure.
+
+   Supports point-free pipeline usage:
+     (-> (fx/succeed> {:amount 100})
+         (fx/map-ctx> (fn [order {:keys [tax-rate]}]
+                        (assoc order :total (* (:amount order) (inc (or tax-rate 0)))))))"
+  ([f]
+   (map-ctx> nil f))
+  ([prev-effect f]
+   (make-effect :map-ctx
+     prev-effect
+     (fn [value]
+       (maybe-propagate-failure value
+         (f value *context*))))))
+
 (defn do>
   "Executes a side-effecting function `f` on the successful value (e.g. logging or metrics)
    and propagates the original value unchanged to the next effect in the pipeline.
@@ -134,6 +153,104 @@
        (maybe-propagate-failure value
          (f value)
          value)))))
+
+(defn do-ctx>
+  "Executes a side-effecting binary function `(f value context)` on the successful value and
+   active context, and propagates the original value unchanged.
+   Short-circuits if the upstream effect yielded a failure.
+
+   Example:
+     (-> (fx/succeed> 10)
+         (fx/do-ctx> (fn [v {:keys [logger]}] (when logger (logger v))))
+         (fx/map> inc))"
+  ([f]
+   (do-ctx> nil f))
+  ([prev-effect f]
+   (make-effect :do-ctx
+     prev-effect
+     (fn [value]
+       (maybe-propagate-failure value
+         (f value *context*)
+         value)))))
+
+(defn context>
+  "Creates an effect yielding the active execution context map or a value at `key`.
+
+   Examples:
+     (fx/context>) ;; yields entire *context* map
+     (fx/context> :db) ;; yields (:db *context*)
+     (fx/context> :db default-db) ;; yields default-db if :db is absent in *context*"
+  ([]
+   (make-effect :context nil (fn [_] *context*)))
+  ([key]
+   (make-effect :context nil (fn [_] (get *context* key))))
+  ([key default-val]
+   (make-effect :context nil (fn [_] (get *context* key default-val)))))
+
+(defn service>
+  "Creates an effect extracting service `key` from the active execution context.
+
+   Examples:
+     (fx/service> :db)
+     (fx/service> :timeout 5000)"
+  ([key]
+   (context> key))
+  ([key default-val]
+   (context> key default-val)))
+
+(defn provide>
+  "Executes `effect` within a dynamic context merged with `context-map`.
+
+   Supports point-free pipeline threading and standalone wrapping:
+     (-> (fx/service> :db)
+         (fx/provide> {:db mock-db}))
+
+     (fx/provide> {:db mock-db} (fx/service> :db))
+
+     (-> (fx/succeed> 10)
+         (fx/provide> (fx/map-ctx> (fn [v ctx] (* v (:multiplier ctx)))) {:multiplier 4}))"
+  ([context-map]
+   (provide> nil context-map))
+  ([a b]
+   (let [[target-effect context-map] (cond
+                                       (effect? a) [a b]
+                                       (effect? b) [b a]
+                                       (and (map? a) (not (effect? a))) [b a]
+                                       :else [a b])]
+     (make-effect :provide
+       nil
+       (fn [value]
+         (binding [*context* (assoc (merge *context* context-map) :runner (get *context* :runner run-sync!))]
+           (if target-effect
+             (let [eff (if (some? value)
+                         (chain> (succeed> value) target-effect)
+                         target-effect)]
+               (-run! eff))
+             value))))))
+  ([prev-effect body-effect context-map]
+   (make-effect :provide
+     prev-effect
+     (fn [value]
+       (binding [*context* (assoc (merge *context* context-map) :runner (get *context* :runner run-sync!))]
+         (let [eff (if (some? value)
+                     (chain> (succeed> value) body-effect)
+                     body-effect)]
+           (-run! eff)))))))
+
+(defn provide-service>
+  "Executes `effect` within a dynamic context where `key` is bound to `service-impl`.
+
+   Supports point-free pipeline threading and standalone wrapping:
+     (-> (fx/service> :db)
+         (fx/provide-service> :db mock-db))
+
+     (fx/provide-service> :db mock-db (fx/service> :db))"
+  ([key service-impl]
+   (provide> {key service-impl}))
+  ([a b c]
+   (if (keyword? a)
+     (provide> c {a b})
+     (provide> a {b c}))))
 
 (defn ensure>
   "Executes a `finalizer-effect` guaranteed after the previous effect completes,
@@ -244,9 +361,9 @@
   (make-effect
     :all
     nil
-    (constantly
+    (fn [_]
       (->> effects
-           (mapv (fn [eff] (-eval! eff nil)))))))
+           (mapv (fn [eff] (-run! eff)))))))
 
 (defn mapcat>
   "Flat-maps over an effect by applying an inner effect combinator to the successful value.
@@ -374,17 +491,23 @@
 
 (defn run-sync!
   "Synchronously evaluates an effect pipeline from root to leaf and returns the final value
-   or failure. Binds `*context*` with `:runner run-sync!` during execution.
+   or failure. Binds `*context*` with optional initial `context` (or merged with active context)
+   and ensures `:runner run-sync!` is present during execution.
 
-   Example:
+   Examples:
      (fx/run-sync! (fx/succeed> 42))
-     ;; => 42"
-  [effect]
-  (binding [*context* (assoc *context* :runner run-sync!)]
-    (->> effect
-         (iterate prev-effect)
-         (take-while some?)
-         (reverse)
-         (reduce (fn [acc effect]
-                   (-eval! effect acc))
-                 nil))))
+     ;; => 42
+
+     (fx/run-sync! (fx/service> :db) {:db mock-db})
+     ;; => mock-db"
+  ([effect]
+   (run-sync! effect {}))
+  ([effect context]
+   (binding [*context* (assoc (merge *context* context) :runner run-sync!)]
+     (->> effect
+          (iterate prev-effect)
+          (take-while some?)
+          (reverse)
+          (reduce (fn [acc effect]
+                    (-eval! effect acc))
+                  nil)))))

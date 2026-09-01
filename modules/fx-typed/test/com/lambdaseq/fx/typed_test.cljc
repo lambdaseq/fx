@@ -396,6 +396,11 @@
              Long
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]]))
+  (testing "run-sync! with context map evaluates and returns output"
+    (is-tc-e (fx/run-sync! (fx/succeed> 10) {:env :prod})
+             Long
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]]))
   (testing "run-sync! with string effect"
     (is-tc-e (fx/run-sync! (fx/succeed> "hello"))
              String
@@ -404,5 +409,81 @@
   (testing "run-sync! with failure returns failure or nil"
     (is-tc-e (fx/run-sync! (fx/fail> :not-found {}))
              (t/U nil (fx/IFailure (t/Val :not-found) (t/HMap :complete? true)))
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest context>-ann--test
+  (testing "context> returns effect yielding context map or extracted key"
+    (is-tc-e (fx/context>)
+             (fx/IEffect t/Any com.lambdaseq.fx.typed/Context nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (fx/context> :db)
+             (fx/IEffect t/Any t/Any nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (fx/context> :timeout 5000)
+             (fx/IEffect t/Any Long nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest service>-ann--test
+  (testing "service> returns effect yielding service or default"
+    (is-tc-e (fx/service> :db)
+             (fx/IEffect t/Any t/Any nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (fx/service> :timeout 5000)
+             (fx/IEffect t/Any Long nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest map-ctx>-ann--test
+  (testing "map-ctx> infers output type from binary function"
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/map-ctx> (fn [v _ctx] (inc v))))
+             (fx/IEffect t/Any Long nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/map-ctx> (fn [v _ctx] (str v))))
+             (fx/IEffect t/Any String nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest do-ctx>-ann--test
+  (testing "do-ctx> preserves output type of previous effect"
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/do-ctx> (fn [v _ctx] (println v))))
+             (fx/IEffect t/Any Long nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (-> (fx/succeed> "hello")
+                 (fx/do-ctx> (fn [v _ctx] (println v))))
+             (fx/IEffect t/Any String nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest provide>-ann--test
+  (testing "provide> executes target effect and returns its effect type"
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/provide> {:multiplier 2}))
+             (fx/IEffect t/Any Long nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (fx/provide> {:multiplier 2} (fx/succeed> "test"))
+             (fx/IEffect t/Any String nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])))
+
+(deftest provide-service>-ann--test
+  (testing "provide-service> executes target effect with single service bound"
+    (is-tc-e (-> (fx/succeed> 10)
+                 (fx/provide-service> :db {:conn "postgres"}))
+             (fx/IEffect t/Any Long nil '{})
+             :requires [[com.lambdaseq.fx.core :as fx]
+                        [com.lambdaseq.fx.typed]])
+    (is-tc-e (fx/provide-service> :db {:conn "postgres"} (fx/succeed> 42))
+             (fx/IEffect t/Any Long nil '{})
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]])))
