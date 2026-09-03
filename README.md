@@ -2,7 +2,9 @@
 
 A lightweight, purely functional effect system for Clojure and ClojureScript inspired by Effect-ts and ZIO.
 
-`fx` models synchronous and asynchronous computations, resource lifecycles, and failure channels as pure, transparent data structures composed with Clojure's thread-first (`->`) macro. Pipelines short-circuit automatically on failure, manage resources safely, execute in constant JVM stack space, and evaluate only when explicitly triggered.
+`fx` models synchronous and asynchronous computations, resource lifecycles, and failure channels as pure, transparent
+data structures composed with Clojure's thread-first (`->`) macro. Pipelines short-circuit automatically on failure,
+manage resources safely, execute in constant JVM stack space, and evaluate only when explicitly triggered.
 
 ## Installation
 
@@ -36,87 +38,92 @@ Functions that create or transform effects end in `>`, and functions that execut
 
 ## Mental Model
 
-- **100% Transparent Data AST**: Effects are immutable `defrecord` instances exposing `:tag`, `:prev-effect`, and explicit parameters (`:f`, `:policy`, `:target`, etc.), enabling programmatic inspection, mocking, and optimization.
-- **Deterministic Monomorphic Contracts**: Strict argument typing across all combinators (pure functions vs `Effect` records) with zero dynamic coercion overhead.
+- **100% Transparent Data AST**: Effects are immutable `defrecord` instances exposing `:tag`, `:prev-effect`, and
+  explicit parameters (`:f`, `:policy`, `:target`, etc.), enabling programmatic inspection, mocking, and optimization.
+- **Deterministic Monomorphic Contracts**: Strict argument typing across all combinators (pure functions vs `Effect`
+  records) with zero dynamic coercion overhead.
 - **Thread-First Composition**: Effects chain naturally with standard Clojure `->` threading.
 - **Two Output Channels**: Pipelines yield either a success value or a structured, typed `Failure` record.
 - **Automatic Short-Circuiting**: On failure, downstream transformation steps are skipped automatically.
-- **Stack-Safe Continuation Interpreter**: Evaluation runs in constant $O(1)$ JVM stack space via heap-allocated continuation frames (`-step`, `-resume`, `-unwind`), eliminating `StackOverflowError` on deeply nested or recursive pipelines.
-- **Pure Context Threading**: Environmental dependencies and services are passed explicitly as pure immutable maps without dynamic var (`*context*`) overhead.
+- **Stack-Safe Continuation Interpreter**: Evaluation runs in constant $O (1)$ JVM stack space via heap-allocated
+  continuation frames (`-step`, `-resume`, `-unwind`), eliminating `StackOverflowError` on deeply nested or recursive
+  pipelines.
+- **Pure Context Threading**: Environmental dependencies and services are passed explicitly as pure immutable maps.
 - **Explicit Execution**: Pipelines stay inert until evaluated with `run-sync!` or `run-async!`.
 
 ## API Overview
 
 ### Core Constructors & Combinators (`com.lambdaseq.fx.core`)
 
-| Function | Signature | Description |
-| --- | --- | --- |
-| `succeed>` | `[val]` | Creates a successful effect yielding `val`. |
-| `fail>` | `([failure] [tag data])` | Creates a failed effect holding a typed `Failure`. |
-| `map>` | `([f] [eff f])` | Transforms successful values with unary function `f`. |
-| `map-ctx>` | `([f] [eff f])` | Transforms successful values with binary function `(f val context)`. |
-| `mapcat>` | `([f] [eff f])` | Flat-maps over an effect with an effect-producing function `(f val) -> Effect`. |
-| `tap>` | `([f] [eff f])` | Executes side-effect `f` on success and passes the value through unchanged. |
-| `tap-error>` | `([f] [eff f])` | Executes side-effect `f` on failure and passes the failure through unchanged. |
-| `do-ctx>` | `([f] [eff f])` | Executes side-effect `(f val context)` and passes value unchanged. |
-| `context>` | `([] [key] [key default])` | Yields the active execution context map or a specific key value. |
-| `service>` | `([key] [key default])` | Extracts a service dependency from the active context. |
-| `provide>` | `([ctx-map] [eff ctx-map] [eff body ctx-map])` | Executes effects within a scoped context map override. |
-| `provide-service>` | `([k v] [eff k v] [k v eff])` | Injects a single service key-value pair into context. |
-| `ensure>` | `([finalizer-eff] [eff finalizer-eff])` | Guaranteed finalizer that executes on success or failure, preserving upstream value. |
-| `acquire-release>` | `([acquire use release] [use release])` | Safe resource bracket: acquires a resource, executes `use`, and guarantees `release`. |
-| `retry>` | `([policy] [eff policy])` | Retries a failed effect according to a retry policy map. |
-| `try>` | `([eff] [eff catch] [prev eff catch])` | Catches thrown exceptions and converts them to typed failures. |
-| `if>` | `([cond-eff then-eff else-eff] ...)` | Branches execution based on a predicate effect. |
-| `cond>` | `([eff & test-expr-pairs])` | Multi-branch conditional evaluating test-expression pairs. |
-| `match>` | `([on-failure on-success] [eff on-failure on-success])` | Pattern-matches on both failure and success channels. |
-| `or-else>` | `([fallback-eff] [eff fallback-eff])` | Recovers from any failure by executing a fallback effect. |
-| `or-else-fail>` | `([failure] [eff failure])` | Replaces any upstream failure with a custom failure descriptor. |
-| `all>` | `[effects]` | Evaluates a vector of independent effects and collects results into a vector. |
-| `zip>` | `[eff-a eff-b]` | Combines two effects into a pair `[val-a val-b]`. |
-| `zip-with>` | `[eff-a eff-b f]` | Combines two effects using a binary combining function `(f a b)`. |
-| `for-each>` | `([f] [coll f])` | Iterates over items applying an effect-producing function `f`. |
-| `catch>` | `([handler-map] [eff handler-map])` | Recovers from specific failures using a `{tag-key handler-eff}` map. |
-| `catchall>` | `([inner-eff] [eff inner-eff])` | Recovers from any failure by passing failure map to `inner-eff`. |
-| `die>` | `([] [msg] [msg data] [eff msg data])` | Terminates execution by throwing an uncatchable exception. |
-| `or-die>` | `([] [on-failure] [eff on-failure])` | Converts failures into fatal uncatchable runtime exceptions. |
-| `sleep>` | `([ms] [eff ms])` | Pauses execution for `ms` milliseconds. |
-| `chain>` | `[prev-eff current-eff]` | Links two effects into a sequential chain. |
-| `run-sync!` | `([eff] [eff context])` | Evaluates an effect pipeline synchronously with optional context. |
-| `run-async!` | `([eff] [eff context])` | Evaluates an effect pipeline asynchronously (returns `CompletableFuture` on JVM / `js/Promise` on JS). |
+| Function           | Signature                                               | Description                                                                                            |
+|--------------------|---------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| `succeed>`         | `[val]`                                                 | Creates a successful effect yielding `val`.                                                            |
+| `fail>`            | `([failure] [tag data])`                                | Creates a failed effect holding a typed `Failure`.                                                     |
+| `map>`             | `([f] [eff f])`                                         | Transforms successful values with unary function `f`.                                                  |
+| `map-ctx>`         | `([f] [eff f])`                                         | Transforms successful values with binary function `(f val context)`.                                   |
+| `mapcat>`          | `([f] [eff f])`                                         | Flat-maps over an effect with an effect-producing function `(f val) -> Effect`.                        |
+| `tap>`             | `([f] [eff f])`                                         | Executes side-effect `f` on success and passes the value through unchanged.                            |
+| `tap-error>`       | `([f] [eff f])`                                         | Executes side-effect `f` on failure and passes the failure through unchanged.                          |
+| `do-ctx>`          | `([f] [eff f])`                                         | Executes side-effect `(f val context)` and passes value unchanged.                                     |
+| `context>`         | `([] [key] [key default])`                              | Yields the active execution context map or a specific key value.                                       |
+| `service>`         | `([key] [key default])`                                 | Extracts a service dependency from the active context.                                                 |
+| `provide>`         | `([ctx-map] [eff ctx-map] [eff body ctx-map])`          | Executes effects within a scoped context map override.                                                 |
+| `provide-service>` | `([k v] [eff k v] [k v eff])`                           | Injects a single service key-value pair into context.                                                  |
+| `ensure>`          | `([finalizer-eff] [eff finalizer-eff])`                 | Guaranteed finalizer that executes on success or failure, preserving upstream value.                   |
+| `acquire-release>` | `([acquire use release] [use release])`                 | Safe resource bracket: acquires a resource, executes `use`, and guarantees `release`.                  |
+| `retry>`           | `([policy] [eff policy])`                               | Retries a failed effect according to a retry policy map.                                               |
+| `try>`             | `([eff] [eff catch] [prev eff catch])`                  | Catches thrown exceptions and converts them to typed failures.                                         |
+| `if>`              | `([cond-eff then-eff else-eff] ...)`                    | Branches execution based on a predicate effect.                                                        |
+| `cond>`            | `([eff & test-expr-pairs])`                             | Multi-branch conditional evaluating test-expression pairs.                                             |
+| `match>`           | `([on-failure on-success] [eff on-failure on-success])` | Pattern-matches on both failure and success channels.                                                  |
+| `or-else>`         | `([fallback-eff] [eff fallback-eff])`                   | Recovers from any failure by executing a fallback effect.                                              |
+| `or-else-fail>`    | `([failure] [eff failure])`                             | Replaces any upstream failure with a custom failure descriptor.                                        |
+| `all>`             | `[effects]`                                             | Evaluates a vector of independent effects and collects results into a vector.                          |
+| `zip>`             | `[eff-a eff-b]`                                         | Combines two effects into a pair `[val-a val-b]`.                                                      |
+| `zip-with>`        | `[eff-a eff-b f]`                                       | Combines two effects using a binary combining function `(f a b)`.                                      |
+| `for-each>`        | `([f] [coll f])`                                        | Iterates over items applying an effect-producing function `f`.                                         |
+| `catch>`           | `([handler-map] [eff handler-map])`                     | Recovers from specific failures using a `{tag-key handler-eff}` map.                                   |
+| `catchall>`        | `([inner-eff] [eff inner-eff])`                         | Recovers from any failure by passing failure map to `inner-eff`.                                       |
+| `die>`             | `([] [msg] [msg data] [eff msg data])`                  | Terminates execution by throwing an uncatchable exception.                                             |
+| `or-die>`          | `([] [on-failure] [eff on-failure])`                    | Converts failures into fatal uncatchable runtime exceptions.                                           |
+| `sleep>`           | `([ms] [eff ms])`                                       | Pauses execution for `ms` milliseconds.                                                                |
+| `chain>`           | `[prev-eff current-eff]`                                | Links two effects into a sequential chain.                                                             |
+| `run-sync!`        | `([eff] [eff context])`                                 | Evaluates an effect pipeline synchronously with optional context.                                      |
+| `run-async!`       | `([eff] [eff context])`                                 | Evaluates an effect pipeline asynchronously (returns `CompletableFuture` on JVM / `js/Promise` on JS). |
 
 ---
 
 ### Pipeline Utilities & Metaprogramming (`com.lambdaseq.fx.utils`)
 
-| Function | Signature | Description |
-| --- | --- | --- |
-| `chain-length` | `[leaf-eff]` | Returns total number of effect stages in the linear pipeline. |
-| `effect-tags` | `[leaf-eff]` | Returns vector of tags in forward execution order `[:succeed :map ...]`. |
-| `effect-seq` | `[leaf-eff]` | Returns vector of effect nodes in forward execution order. |
-| `root-effect` | `[leaf-eff]` | Traverses upstream links to return the root effect. |
-| `find-first-by-tag` | `[leaf-eff tag]` | Finds first effect node matching `tag`. |
-| `find-all-by-tag` | `[leaf-eff tag]` | Returns all effect nodes matching `tag`. |
-| `map-effects` | `[leaf-eff f]` | Applies pure transform `(f eff)` to every node in the pipeline. |
-| `replace-by-tag` | `[leaf-eff tag replacement]` | Replaces first node matching `tag` with `replacement`. |
-| `remove-by-tag` | `[leaf-eff tag]` | Removes all nodes matching `tag` and reconnects surrounding nodes. |
-| `insert-after-tag` | `[leaf-eff tag new-eff]` | Slices `new-eff` immediately after the first node matching `tag`. |
-| `insert-before-tag` | `[leaf-eff tag new-eff]` | Slices `new-eff` immediately before the first node matching `tag`. |
-| `concat-chains` | `[chain-a chain-b]` | Concatenates two effect pipelines into a single continuous chain. |
-| `slice-effects` | `[leaf-eff start end]` | Extracts a sub-pipeline between stage indices `start` and `end`. |
-| `ast-seq` | `[root-eff]` | Traverses nested composite and branching AST nodes into a flat sequence. |
-| `pipe>` | `[& combinators]` | Composes pipeline combinators `(Effect -> Effect)` in forward execution order. |
-| `comp>` | `[& combinators]` | Composes pipeline combinators in standard mathematical right-to-left order. |
-| `pipe-fx-fn>` | `[& fx-fns]` | Composes effect-producing functions (Kleisli arrows: `a -> Effect[b]`). |
-| `around>` | `[before-fn after-fn]` | Wraps an effect stage with before/after actions while preserving its value. |
-| `with-scoped-service>` | `[key val combinator]` | Wraps a combinator to execute inside a scoped service binding. |
-| `compose-ast-passes` | `[& passes]` | Composes multiple AST rewrite passes into an optimizing compiler pipeline. |
+| Function               | Signature                    | Description                                                                    |
+|------------------------|------------------------------|--------------------------------------------------------------------------------|
+| `chain-length`         | `[leaf-eff]`                 | Returns total number of effect stages in the linear pipeline.                  |
+| `effect-tags`          | `[leaf-eff]`                 | Returns vector of tags in forward execution order `[:succeed :map ...]`.       |
+| `effect-seq`           | `[leaf-eff]`                 | Returns vector of effect nodes in forward execution order.                     |
+| `root-effect`          | `[leaf-eff]`                 | Traverses upstream links to return the root effect.                            |
+| `find-first-by-tag`    | `[leaf-eff tag]`             | Finds first effect node matching `tag`.                                        |
+| `find-all-by-tag`      | `[leaf-eff tag]`             | Returns all effect nodes matching `tag`.                                       |
+| `map-effects`          | `[leaf-eff f]`               | Applies pure transform `(f eff)` to every node in the pipeline.                |
+| `replace-by-tag`       | `[leaf-eff tag replacement]` | Replaces first node matching `tag` with `replacement`.                         |
+| `remove-by-tag`        | `[leaf-eff tag]`             | Removes all nodes matching `tag` and reconnects surrounding nodes.             |
+| `insert-after-tag`     | `[leaf-eff tag new-eff]`     | Slices `new-eff` immediately after the first node matching `tag`.              |
+| `insert-before-tag`    | `[leaf-eff tag new-eff]`     | Slices `new-eff` immediately before the first node matching `tag`.             |
+| `concat-chains`        | `[chain-a chain-b]`          | Concatenates two effect pipelines into a single continuous chain.              |
+| `slice-effects`        | `[leaf-eff start end]`       | Extracts a sub-pipeline between stage indices `start` and `end`.               |
+| `ast-seq`              | `[root-eff]`                 | Traverses nested composite and branching AST nodes into a flat sequence.       |
+| `pipe>`                | `[& combinators]`            | Composes pipeline combinators `(Effect -> Effect)` in forward execution order. |
+| `comp>`                | `[& combinators]`            | Composes pipeline combinators in standard mathematical right-to-left order.    |
+| `pipe-fx-fn>`          | `[& fx-fns]`                 | Composes effect-producing functions (Kleisli arrows: `a -> Effect[b]`).        |
+| `around>`              | `[before-fn after-fn]`       | Wraps an effect stage with before/after actions while preserving its value.    |
+| `with-scoped-service>` | `[key val combinator]`       | Wraps a combinator to execute inside a scoped service binding.                 |
+| `compose-ast-passes`   | `[& passes]`                 | Composes multiple AST rewrite passes into an optimizing compiler pipeline.     |
 
 ## Guide & Examples
 
 ### Creating Effects & Error Propagation
 
-Effects are constructed using `succeed>` or `fail>`. Upstream failures short-circuit downstream transformations without executing them:
+Effects are constructed using `succeed>` or `fail>`. Upstream failures short-circuit downstream transformations without
+executing them:
 
 ```clojure
 ;; Success
@@ -157,7 +164,8 @@ Use `tap-error>` to inspect failures without recovering from them:
 
 ### Guaranteed Finalization with `ensure>`
 
-`ensure>` executes a finalizer effect (or function) after the upstream pipeline completes, guaranteed to run whether the preceding steps succeeded or failed:
+`ensure>` executes a finalizer effect (or function) after the upstream pipeline completes, guaranteed to run whether the
+preceding steps succeeded or failed:
 
 ```clojure
 ;; Finalizer runs on success; original value is preserved
@@ -177,7 +185,8 @@ Use `tap-error>` to inspect failures without recovering from them:
 
 ### Exception Safety with `try>`
 
-`try>` wraps operations that may throw host exceptions (JVM `Throwable` or JS error) and converts them into structured `Failure` records:
+`try>` wraps operations that may throw host exceptions (JVM `Throwable` or JS error) and converts them into structured
+`Failure` records:
 
 ```clojure
 ;; Default failure tag (:try)
@@ -220,8 +229,8 @@ Conditional combinators take effect combinators for predicates and branches:
 (-> (fx/succeed> 15)
     (fx/cond>
       (fx/map> #(zero? (mod % 15))) (fx/succeed> "FizzBuzz")
-      (fx/map> #(zero? (mod % 3)))  (fx/succeed> "Fizz")
-      (fx/map> #(zero? (mod % 5)))  (fx/succeed> "Buzz"))
+      (fx/map> #(zero? (mod % 3))) (fx/succeed> "Fizz")
+      (fx/map> #(zero? (mod % 5))) (fx/succeed> "Buzz"))
     (fx/run-sync!))
 ;; => "FizzBuzz"
 ```
@@ -262,11 +271,13 @@ Recover from failures using `catch>` for specific error tags or `catchall>` for 
 
 ### Dependency Injection & Context Provision
 
-`fx` provides first-class dependency injection and environmental context propagation without mutable singletons or global state.
+`fx` provides first-class dependency injection and environmental context propagation without mutable singletons or
+global state.
 
 #### 1. Consuming Dependencies with `service>` and `context>`
 
-Effects can access dependencies (database connections, HTTP clients, configuration maps) directly from the execution context:
+Effects can access dependencies (database connections, HTTP clients, configuration maps) directly from the execution
+context:
 
 ```clojure
 (defn fetch-user [user-id]
@@ -277,7 +288,8 @@ Effects can access dependencies (database connections, HTTP clients, configurati
 
 #### 2. Context-Aware Transformations with `map-ctx>` and `do-ctx>`
 
-When an operation needs both the pipeline's current value and active context simultaneously, use `map-ctx>` or `do-ctx>` with a 2-argument callback `(f value context)`:
+When an operation needs both the pipeline's current value and active context simultaneously, use `map-ctx>` or `do-ctx>`
+with a 2-argument callback `(f value context)`:
 
 ```clojure
 (-> (fx/succeed> {:amount 100})
@@ -292,7 +304,8 @@ When an operation needs both the pipeline's current value and active context sim
 
 #### 3. Scoped Dependency Injection with `provide>` and `provide-service>`
 
-`provide>` and `provide-service>` scope context maps or individual services to an effect tree, ideal for test mocking and isolation:
+`provide>` and `provide-service>` scope context maps or individual services to an effect tree, ideal for test mocking
+and isolation:
 
 ```clojure
 (def mock-db
@@ -317,16 +330,17 @@ Supply production dependencies at the application boundary using `run-sync!`:
 
 ```clojure
 (def prod-context
-  {:db (create-connection-pool db-config)
+  {:db     (create-connection-pool db-config)
    :logger (create-logger)
-   :env :prod})
+   :env    :prod})
 
 (fx/run-sync! (fetch-user 42) prod-context)
 ```
 
 ### Resource Management with `acquire-release>`
 
-`acquire-release>` ensures resources (file handles, sockets, database transactions) are properly acquired, used, and guaranteed to be released even if exceptions or failures occur:
+`acquire-release>` ensures resources (file handles, sockets, database transactions) are properly acquired, used, and
+guaranteed to be released even if exceptions or failures occur:
 
 ```clojure
 (def read-file-safely
@@ -350,17 +364,18 @@ Supply production dependencies at the application boundary using `run-sync!`:
 ```clojure
 (def resilient-fetch
   (-> (fetch-user 42)
-      (fx/retry> {:max-attempts 3
-                  :delay-ms 100
+      (fx/retry> {:max-attempts   3
+                  :delay-ms       100
                   :backoff-factor 2.0
-                  :retry-if (fn [failure] (= (fx/tag failure) :timeout))})))
+                  :retry-if       (fn [failure] (= (fx/tag failure) :timeout))})))
 
 (fx/run-sync! resilient-fetch prod-context)
 ```
 
 ### Asynchronous Execution with `run-async!`
 
-`run-async!` executes effect pipelines asynchronously on background thread pools (JVM `CompletableFuture` / JS `Promise`) with zero dynamic var binding cost:
+`run-async!` executes effect pipelines asynchronously on background thread pools (JVM `CompletableFuture` / JS
+`Promise`) with zero dynamic var binding cost:
 
 ```clojure
 ;; Returns CompletableFuture on JVM / js/Promise on JS
@@ -375,7 +390,8 @@ Supply production dependencies at the application boundary using `run-sync!`:
 
 ## Pipeline Metaprogramming & Utilities (`com.lambdaseq.fx.utils`)
 
-Because FX effects are 100% transparent data records, `com.lambdaseq.fx.utils` allows you to inspect, query, transform, optimize, and compose effect pipelines as pure data without executing them.
+Because FX effects are 100% transparent data records, `com.lambdaseq.fx.utils` allows you to inspect, query, transform,
+optimize, and compose effect pipelines as pure data without executing them.
 
 ```clojure
 (require '[com.lambdaseq.fx.utils :as fxu])
