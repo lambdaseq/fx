@@ -16,8 +16,8 @@
                  [failure :< (t/Option (fx/IFailure t/Keyword t/Any)) :variance :covariant]
                  [context :< Context :variance :covariant]] fx/IEffect
   -prev-effect [(fx/IEffect in out failure context) -> (t/Option (fx/IEffect t/Any in failure Context))]
-  -eval! [(fx/IEffect in out failure context)
-          -> out])
+  -step [(fx/IEffect in out failure context) in context (t/List t/Any)
+         -> (t/Vec t/Any)])
 
 (t/ann fx/effect? [t/Any -> Boolean])
 
@@ -29,7 +29,7 @@
                [context :< Context]]
               [t/Keyword
                (t/Option (fx/IEffect t/Nothing in failure context))
-               [in -> out]
+               (t/Map t/Keyword t/Any)
                -> (fx/IEffect in out failure context)]))
 
 (t/ann fx/make-failure (t/All [[key :< t/Keyword] error]

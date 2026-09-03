@@ -3,69 +3,81 @@
   #?(:clj (:import (java.util.concurrent CompletableFuture)
                    (java.util.function Supplier))))
 
-(declare run-sync! failure->value)
+(declare run-sync! failure->value succeed> fail> make-failure chain> handle-try-exception)
+
+;; ---------------------------------------------------------------------------
+;; Protocols
+;; ---------------------------------------------------------------------------
 
 (defprotocol ITagged
   "Protocol representing a tagged data structure in the effect system."
   (tag [this]
     "Returns the keyword identifying the tag (e.g. effect tag or failure tag)."))
 
-(defprotocol IEffect
-  "Protocol representing an executable effect in a computation pipeline."
-  (-eval! [this v]
-    "Evaluates the run function of the effect with input value `v` and returns the result.")
-  (prev-effect [this]
-    "Returns the upstream (previous) effect in the chain, or nil if this is the root."))
-
-(defrecord Effect [tag prev-effect run]
-  ITagged
-  (tag [_] tag)
-  IEffect
-  (-eval! [_ v] (run v))
-  (prev-effect [_] prev-effect))
-
 (defprotocol IFailure
   "Protocol representing a typed failure in the effect system."
   (error-data [this]
     "Returns the error payload/data of the failure."))
 
-(defrecord Failure
-  [tag error-data]
+(defprotocol IEffect
+  "Protocol representing an executable and inspectable effect in a computation pipeline."
+  (prev-effect [this]
+    "Returns the upstream (previous) effect in the chain, or nil if this is the root.")
+  (-step [this value context stack]
+    "Performs one execution step, returning:
+     [next-effect next-value next-context next-stack]."))
+
+(defprotocol IContinuation
+  "Protocol for execution frames held on the heap continuation stack."
+  (-resume [this value context stack]
+    "Resumes execution when a sub-computation completes or an upstream step finishes, returning:
+     [next-effect next-value next-context next-stack]."))
+
+(defprotocol IUnwindable
+  "Protocol for continuation frames that participate in exception unwinding and resource cleanup."
+  (-unwind [this exception rest-stack]
+    "Handles exception unwinding. Returns a map {:effect ... :value ... :context ... :rest-stack ...}
+     or nil to continue unwinding."))
+
+;; ---------------------------------------------------------------------------
+;; Failure Record
+;; ---------------------------------------------------------------------------
+
+(defrecord Failure [tag error-data]
   ITagged
   (tag [_] tag)
   IFailure
   (error-data [_] error-data))
 
+;; ---------------------------------------------------------------------------
+;; Helpers & Predicates
+;; ---------------------------------------------------------------------------
+
+(defn effect?
+  "Returns true if `x` implements IEffect."
+  [x]
+  #?(:clj  (instance? com.lambdaseq.fx.core.IEffect x)
+     :cljs (satisfies? IEffect x)))
+
+(defn failure?
+  "Returns true if `x` implements IFailure."
+  [x]
+  #?(:clj  (instance? com.lambdaseq.fx.core.IFailure x)
+     :cljs (satisfies? IFailure x)))
+
+(defn- attach-root [root-eff target-eff]
+  (if (nil? target-eff)
+    root-eff
+    (if (nil? (:prev-effect target-eff))
+      (assoc target-eff :prev-effect root-eff)
+      (assoc target-eff :prev-effect (attach-root root-eff (:prev-effect target-eff))))))
+
 (defn chain>
   "Chains `current-effect` onto `prev-effect` by setting `prev-effect` as its upstream dependency."
   [prev-effect current-effect]
-  (assoc current-effect :prev-effect prev-effect))
-
-(def ^:dynamic *context*
-  "Dynamic map holding execution context and runtime state (e.g. :runner)."
-  {})
-
-(defn- -run!
-  "Helper function for running an effect using the current runner in *context*."
-  [effect]
-  (let [runner (get *context* :runner run-sync!)]
-    (runner effect)))
-
-(defn effect?
-  "Returns true if `x` implements IEffect or is an instance of Effect."
-  [x]
-  (instance? Effect x))
-
-(defn failure?
-  "Returns true if `x` implements IFailure or is an instance of Failure."
-  [x]
-  (instance? Failure x))
-
-(defn make-effect
-  "Creates a new Effect record given a `tag` keyword, an upstream `prev-effect` (or nil),
-   and a single-argument execution function `run`."
-  [tag prev-effect run]
-  (Effect. tag prev-effect run))
+  (if (nil? (:prev-effect current-effect))
+    (assoc current-effect :prev-effect prev-effect)
+    (attach-root prev-effect current-effect)))
 
 (defn make-failure
   "Creates a new Failure record given a `tag` keyword and an `err` payload map or value."
@@ -80,13 +92,709 @@
        v#
        (do ~@body))))
 
-(defmacro maybe-propagate-effect
-  "If `v` is an effect, returns `v` directly. Otherwise evaluates `body`."
-  [v & body]
-  `(let [v# ~v]
-     (if (effect? v#)
-       v#
-       (do ~@body))))
+(defn failure->value
+  "Converts an IFailure instance into a plain map `{:tag ... :error-data ...}`."
+  [failure]
+  {:tag        (tag failure)
+   :error-data (error-data failure)})
+
+(defn- handle-try-exception [catch-handler e]
+  (cond
+    (nil? catch-handler)
+    (make-failure :try e)
+
+    (keyword? catch-handler)
+    (make-failure catch-handler e)
+
+    (effect? catch-handler)
+    catch-handler
+
+    (map? catch-handler)
+    (let [matched-handler (some (fn [[k handler]]
+                                  (cond
+                                    #?@(:clj [(and (class? k) (instance? k e)) handler])
+                                    (and (fn? k) (k e)) handler
+                                    (= k :default) handler
+                                    :else nil))
+                                catch-handler)]
+      (if matched-handler
+        (handle-try-exception matched-handler e)
+        (make-failure :try e)))
+
+    (ifn? catch-handler)
+    (let [res (catch-handler e)]
+      (if (failure? res)
+        res
+        (make-failure :try res)))
+
+    :else
+    (make-failure :try e)))
+
+;; ---------------------------------------------------------------------------
+;; Continuation Frame Records with Polymorphic -resume & -unwind Dispatch
+;; ---------------------------------------------------------------------------
+
+(defrecord StepEffectFrame [effect]
+  IContinuation
+  (-resume [_ val context stack]
+    (-step effect val context stack)))
+
+(defrecord RestoreContextFrame [context]
+  IContinuation
+  (-resume [_ val _current-context stack]
+    [nil val context stack]))
+
+(defrecord TryFrame [catch context]
+  IContinuation
+  (-resume [_ val _current-context stack]
+    [nil val context stack])
+  IUnwindable
+  (-unwind [_ e rest-stack]
+    (let [handler-res (handle-try-exception catch e)]
+      (if (effect? handler-res)
+        {:effect (chain> (succeed> e) handler-res) :context context :rest-stack rest-stack}
+        {:value handler-res :context context :rest-stack rest-stack}))))
+
+(defrecord EnsureFrame [original-value context]
+  IContinuation
+  (-resume [_ val _current-context stack]
+    (if (failure? val)
+      [nil val context stack]
+      [nil original-value context stack]))
+  IUnwindable
+  (-unwind [_ e rest-stack]
+    {:value (make-failure :ensure e) :context context :rest-stack rest-stack}))
+
+(defrecord AcquireReleaseFinishFrame [use-res]
+  IContinuation
+  (-resume [_ rel-res context stack]
+    (if (failure? rel-res)
+      [nil rel-res context stack]
+      [nil use-res context stack])))
+
+(defrecord AcquireReleaseUseFrame [resource release context]
+  IContinuation
+  (-resume [_ use-res _current-context stack]
+    (let [rel-res (try
+                    (if (fn? release) (release resource) release)
+                    (catch #?(:clj Throwable :cljs :default) e
+                      (make-failure :release-error e)))]
+      (if (effect? rel-res)
+        [rel-res nil context (conj stack (->AcquireReleaseFinishFrame use-res))]
+        (cond
+          (failure? use-res) [nil use-res context stack]
+          (failure? rel-res) [nil rel-res context stack]
+          :else [nil use-res context stack]))))
+  IUnwindable
+  (-unwind [_ _ _]
+    (try
+      (if (fn? release) (release resource) release)
+      (catch #?(:clj Throwable :cljs :default) _ nil))
+    nil))
+
+(defrecord AcquireResourceFrame [use release context]
+  IContinuation
+  (-resume [_ resource _current-context stack]
+    (if (failure? resource)
+      [nil resource context stack]
+      (let [use-res (try
+                      (if (fn? use) (use resource) use)
+                      (catch #?(:clj Throwable :cljs :default) e
+                        (try (if (fn? release) (release resource) release)
+                             (catch #?(:clj Throwable :cljs :default) _ nil))
+                        (throw e)))]
+        (if (effect? use-res)
+          (let [eff (if (nil? (:prev-effect use-res)) (chain> (succeed> resource) use-res) use-res)]
+            [eff nil context (conj stack (->AcquireReleaseUseFrame resource release context))])
+          (let [rel-res (try
+                          (if (fn? release) (release resource) release)
+                          (catch #?(:clj Throwable :cljs :default) e
+                            (make-failure :release-error e)))]
+            (if (effect? rel-res)
+              [rel-res nil context (conj stack (->AcquireReleaseFinishFrame use-res))]
+              (cond
+                (failure? use-res) [nil use-res context stack]
+                (failure? rel-res) [nil rel-res context stack]
+                :else [nil use-res context stack]))))))))
+
+(defrecord RetryFrame [target value policy attempt delay-ms]
+  IContinuation
+  (-resume [_ res context stack]
+    (if (and (failure? res)
+             (< attempt (get policy :max-attempts 3))
+             ((get policy :retry-if (constantly true)) res))
+      (do
+        #?(:clj (when (pos? delay-ms) (Thread/sleep delay-ms)) :cljs nil)
+        (let [next-delay (long (* delay-ms (get policy :backoff-factor 1.0)))]
+          [target nil context (conj stack (->RetryFrame target value policy (inc attempt) next-delay))]))
+      [nil res context stack])))
+
+(defrecord AllFrame [remaining results]
+  IContinuation
+  (-resume [_ res context stack]
+    (if (failure? res)
+      [nil res context stack]
+      (let [new-results (conj results res)]
+        (if (empty? remaining)
+          [nil new-results context stack]
+          (let [[next-eff & rest-effs] remaining]
+            [next-eff nil context (conj stack (->AllFrame rest-effs new-results))]))))))
+
+(defrecord ForEachFrame [f remaining results]
+  IContinuation
+  (-resume [_ res context stack]
+    (if (failure? res)
+      [nil res context stack]
+      (let [new-results (conj results res)]
+        (if (empty? remaining)
+          [nil new-results context stack]
+          (let [[next-item & rest-items] remaining
+                next-eff (f next-item)]
+            (if (effect? next-eff)
+              [next-eff nil context (conj stack (->ForEachFrame f rest-items new-results))]
+              (if (failure? next-eff)
+                [nil next-eff context stack]
+                [nil (conj new-results next-eff) context stack]))))))))
+
+(defrecord ZipWithBFrame [res-a f]
+  IContinuation
+  (-resume [_ res-b context stack]
+    (if (failure? res-b)
+      [nil res-b context stack]
+      [nil (f res-a res-b) context stack])))
+
+(defrecord ZipWithAFrame [eff-b value f]
+  IContinuation
+  (-resume [_ res-a context stack]
+    (if (failure? res-a)
+      [nil res-a context stack]
+      (let [b (if (and (some? value) (effect? eff-b) (nil? (:prev-effect eff-b)))
+                (chain> (succeed> value) eff-b)
+                eff-b)]
+        (if (effect? b)
+          [b nil context (conj stack (->ZipWithBFrame res-a f))]
+          [nil (f res-a b) context stack])))))
+
+(defrecord IfFrame [value then else]
+  IContinuation
+  (-resume [_ cond-res context stack]
+    (if (failure? cond-res)
+      [nil cond-res context stack]
+      (let [branch (if cond-res then else)
+            branch-eff (if (nil? (:prev-effect branch))
+                         (chain> (succeed> value) branch)
+                         branch)]
+        [branch-eff nil context stack]))))
+
+(defrecord CondFrame [value expr-eff remaining]
+  IContinuation
+  (-resume [_ test-res context stack]
+    (if (failure? test-res)
+      [nil test-res context stack]
+      (if test-res
+        (let [e-eff (if (nil? (:prev-effect expr-eff))
+                      (chain> (succeed> value) expr-eff)
+                      expr-eff)]
+          [e-eff nil context stack])
+        (if (empty? remaining)
+          [nil (make-failure :cond :no-conditions) context stack]
+          (let [[[next-test next-expr] & rest-conds] remaining
+                t-eff (if (nil? (:prev-effect next-test))
+                        (chain> (succeed> value) next-test)
+                        next-test)]
+            [t-eff nil context (conj stack (->CondFrame value next-expr rest-conds))]))))))
+
+;; ---------------------------------------------------------------------------
+;; Concrete Effect Records with Polymorphic -step Dispatch
+;; ---------------------------------------------------------------------------
+
+(defrecord Effect [tag prev-effect data]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      [nil val context stack])))
+
+(defrecord SucceedEffect [tag prev-effect data value]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      [nil value context stack])))
+
+(defrecord FailEffect [tag prev-effect data failure]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      [nil failure context stack])))
+
+(defrecord MapEffect [tag prev-effect data f]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        [nil (f val) context stack]))))
+
+(defrecord MapCtxEffect [tag prev-effect data f]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        [nil (f val context) context stack]))))
+
+(defrecord TapEffect [tag prev-effect data f]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        (do
+          (f val)
+          [nil val context stack])))))
+
+(defrecord TapErrorEffect [tag prev-effect data f]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        (do
+          (f val)
+          [nil val context stack])
+        [nil val context stack]))))
+
+(defrecord DoCtxEffect [tag prev-effect data f]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        (do
+          (f val context)
+          [nil val context stack])))))
+
+(defrecord ContextEffect [tag prev-effect data key default]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (some? key)
+        [nil (get context key default) context stack]
+        [nil context context stack]))))
+
+(defrecord ProvideEffect [tag prev-effect data body context-map]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (nil? body)
+        [nil val context stack]
+        (let [child-ctx (merge context context-map)
+              eff (if (some? val)
+                    (chain> (succeed> val) body)
+                    body)]
+          [eff nil child-ctx (conj stack (->RestoreContextFrame context))])))))
+
+(defrecord EnsureEffect [tag prev-effect data finalizer]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (let [fin-input (if (failure? val) nil val)
+            fin-eff (if (nil? (:prev-effect finalizer))
+                      (chain> (succeed> fin-input) finalizer)
+                      finalizer)]
+        [fin-eff nil context (conj stack (->EnsureFrame val context))]))))
+
+(defrecord AcquireReleaseEffect [tag prev-effect data acquire use release]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (some? acquire)
+        (let [acq-eff (if (and (some? val) (effect? acquire) (nil? (:prev-effect acquire)))
+                        (chain> (succeed> val) acquire)
+                        acquire)]
+          [acq-eff nil context (conj stack (->AcquireResourceFrame use release context))])
+        (if (nil? val)
+          [nil nil context stack]
+          (if (failure? val)
+            [nil val context stack]
+            (let [use-res (try
+                            (if (fn? use) (use val) use)
+                            (catch #?(:clj Throwable :cljs :default) e
+                              (try (if (fn? release) (release val) release)
+                                   (catch #?(:clj Throwable :cljs :default) _ nil))
+                              (throw e)))]
+              (if (effect? use-res)
+                (let [eff (if (nil? (:prev-effect use-res)) (chain> (succeed> val) use-res) use-res)]
+                  [eff nil context (conj stack (->AcquireReleaseUseFrame val release context))])
+                (let [rel-res (try
+                                (if (fn? release) (release val) release)
+                                (catch #?(:clj Throwable :cljs :default) e
+                                  (make-failure :release-error e)))]
+                  (if (effect? rel-res)
+                    [rel-res nil context (conj stack (->AcquireReleaseFinishFrame use-res))]
+                    (cond
+                      (failure? use-res) [nil use-res context stack]
+                      (failure? rel-res) [nil rel-res context stack]
+                      :else [nil use-res context stack])))))))))))
+
+(defrecord DieEffect [tag prev-effect data err msg die-data]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (cond
+        (some? msg)
+        (throw (ex-info msg (or die-data {})))
+
+        (instance? #?(:clj Throwable :cljs js/Error) err)
+        (throw err)
+
+        (string? err)
+        (throw (ex-info err {:defect err}))
+
+        (map? err)
+        (throw (ex-info "Effect defect encountered" err))
+
+        :else
+        (throw (ex-info "Effect defect encountered" {:defect err}))))))
+
+(defrecord OrDieEffect [tag prev-effect data msg-or-fn]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        (let [val-map (failure->value val)
+              err-payload (error-data val)]
+          (cond
+            (fn? msg-or-fn)
+            (let [res (msg-or-fn val)]
+              (if (instance? #?(:clj Throwable :cljs js/Error) res)
+                (throw res)
+                (throw (ex-info (if (string? res) res "Effect terminated with fatal defect")
+                                (if (map? res) res val-map)))))
+
+            (string? msg-or-fn)
+            (throw (ex-info msg-or-fn val-map))
+
+            (instance? #?(:clj Throwable :cljs js/Error) err-payload)
+            (throw (ex-info "Effect terminated with fatal defect" val-map err-payload))
+
+            :else
+            (throw (ex-info "Effect terminated with fatal defect" val-map))))
+        [nil val context stack]))))
+
+(defrecord MatchEffect [tag prev-effect data on-failure on-success]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        (let [res (if (fn? on-failure) (on-failure val) on-failure)]
+          (if (effect? res)
+            [res nil context stack]
+            [nil res context stack]))
+        (let [res (if (fn? on-success) (on-success val) on-success)]
+          (if (effect? res)
+            [res nil context stack]
+            [nil res context stack]))))))
+
+(defrecord OrElseEffect [tag prev-effect data fallback]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        (let [res (if (fn? fallback) (fallback val) fallback)]
+          (if (effect? res)
+            [(if (nil? (:prev-effect res)) (chain> (succeed> val) res) res) nil context stack]
+            [nil res context stack]))
+        [nil val context stack]))))
+
+(defrecord OrElseFailEffect [tag prev-effect data fail-tag error-data fallback-failure]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        (if (some? fallback-failure)
+          [nil (if (failure? fallback-failure) fallback-failure (make-failure :or-else-fail fallback-failure)) context stack]
+          (let [res-data (if (fn? error-data) (error-data val) error-data)]
+            [nil (make-failure fail-tag res-data) context stack]))
+        [nil val context stack]))))
+
+(defrecord RetryEffect [tag prev-effect data target policy]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (let [eff (if (and (some? val) (effect? target) (nil? (:prev-effect target)))
+                  (chain> (succeed> val) target)
+                  (or target (succeed> val)))]
+        [eff nil context (conj stack (->RetryFrame eff val (or policy {}) 1 (long (get policy :delay-ms 0))))]))))
+
+(defrecord TryEffect [tag prev-effect data body catch]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        (let [eff (if (nil? (:prev-effect body))
+                    (chain> (succeed> val) body)
+                    body)]
+          [eff nil context (conj stack (->TryFrame catch context))])))))
+
+(defrecord TryFnEffect [tag prev-effect data f]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      [nil (f) context stack])))
+
+(defrecord AllEffect [tag prev-effect data effects]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (empty? effects)
+        [nil [] context stack]
+        (let [[eff1 & rest-effs] effects]
+          [eff1 nil context (conj stack (->AllFrame rest-effs []))])))))
+
+(defrecord ForEachEffect [tag prev-effect data coll f]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        (let [items (or coll val [])]
+          (if (empty? items)
+            [nil [] context stack]
+            (let [[item1 & rest-items] items
+                next-eff (f item1)]
+              (cond
+                (effect? next-eff)
+                [next-eff nil context (conj stack (->ForEachFrame f rest-items []))]
+
+                (failure? next-eff)
+                [nil next-eff context stack]
+
+                :else
+                (loop [acc [next-eff]
+                       rem-items rest-items]
+                  (if (empty? rem-items)
+                    [nil acc context stack]
+                    (let [res (f (first rem-items))]
+                      (if (failure? res)
+                        [nil res context stack]
+                        (recur (conj acc res) (rest rem-items))))))))))))))
+
+(defrecord ZipWithEffect [tag prev-effect data eff-a eff-b f]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        (let [a (if (and (some? val) (effect? eff-a) (nil? (:prev-effect eff-a)))
+                  (chain> (succeed> val) eff-a)
+                  eff-a)]
+          (if (effect? a)
+            [a nil context (conj stack (->ZipWithAFrame eff-b val f))]
+            (let [b (if (and (some? val) (effect? eff-b) (nil? (:prev-effect eff-b)))
+                      (chain> (succeed> val) eff-b)
+                      eff-b)]
+              (if (effect? b)
+                [b nil context (conj stack (->ZipWithBFrame a f))]
+                [nil (f a b) context stack]))))))))
+
+(defrecord MapcatEffect [tag prev-effect data inner-effect]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        (if (effect? inner-effect)
+          [(chain> (succeed> val) inner-effect) nil context stack]
+          (if (fn? inner-effect)
+            (let [res (inner-effect val)]
+              (if (effect? res)
+                [(chain> (succeed> val) res) nil context stack]
+                [nil (make-failure :mapcat>-result-not-an-effect {:result res}) context stack]))
+            [nil (make-failure :mapcat>-result-not-an-effect {:result inner-effect}) context stack]))))))
+
+(defrecord IfEffect [tag prev-effect data cond then else]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        (let [cond-eff (if (nil? (:prev-effect cond))
+                         (chain> (succeed> val) cond)
+                         cond)]
+          [cond-eff nil context (conj stack (->IfFrame val then else))])))))
+
+(defrecord CondEffect [tag prev-effect data conditions]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        (if (empty? conditions)
+          [nil (make-failure :cond :no-conditions) context stack]
+          (let [[[test-eff expr-eff] & rest-conds] conditions
+                t-eff (if (nil? (:prev-effect test-eff))
+                        (chain> (succeed> val) test-eff)
+                        test-eff)]
+            [t-eff nil context (conj stack (->CondFrame val expr-eff rest-conds))]))))))
+
+(defrecord CatchEffect [tag prev-effect data handlers]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        (let [val-tag (:tag val)
+              err-payload (error-data val)
+              f-effect (get handlers val-tag)]
+          (if f-effect
+            [(chain> (succeed> err-payload) f-effect) nil context stack]
+            [nil val context stack]))
+        [nil val context stack]))))
+
+(defrecord CatchallEffect [tag prev-effect data inner-effect]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        (let [eff (chain> (succeed> (failure->value val)) inner-effect)]
+          [eff nil context stack])
+        [nil val context stack]))))
+
+(defrecord SleepEffect [tag prev-effect data ms]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        (do
+          #?(:clj  (when (pos? ms) (Thread/sleep ms))
+             :cljs nil)
+          [nil val context stack])))))
+
+;; ---------------------------------------------------------------------------
+;; Effect Constructor / Factory Functions
+;; ---------------------------------------------------------------------------
+
+(defn make-effect
+  "Creates a new generic Effect record given a `tag` keyword, an upstream `prev-effect` (or nil),
+   and a transparent `data` map."
+  [tag prev-effect data]
+  (Effect. tag prev-effect (or data {})))
 
 (defn succeed>
   "Creates a successful effect yielding `value`.
@@ -94,7 +802,7 @@
    Example:
      (fx/succeed> 42)"
   [value]
-  (make-effect :succeed nil (fn [_] value)))
+  (->SucceedEffect :succeed nil {:value value} value))
 
 (defn fail>
   "Creates a failed effect. Accepts either an existing IFailure instance, or a `tag` keyword
@@ -104,9 +812,10 @@
      (fx/fail> (fx/make-failure :not-found {:id 10}))
      (fx/fail> :not-found {:id 10})"
   ([failure]
-   (make-effect :fail nil (constantly failure)))
+   (->FailEffect :fail nil {:failure failure} failure))
   ([tag error-data]
-   (make-effect :fail nil (constantly (make-failure tag error-data)))))
+   (let [f (make-failure tag error-data)]
+     (->FailEffect :fail nil {:failure f} f))))
 
 (defn map>
   "Maps a pure function `f` over the successful value of an effect.
@@ -118,11 +827,7 @@
   ([f]
    (map> nil f))
   ([prev-effect f]
-   (make-effect :map
-                prev-effect
-                (fn [value]
-                  (maybe-propagate-failure value
-                                           (f value))))))
+   (->MapEffect :map prev-effect {:f f} f)))
 
 (defn map-ctx>
   "Maps a binary function `(f value context)` over the successful value and active context.
@@ -135,11 +840,7 @@
   ([f]
    (map-ctx> nil f))
   ([prev-effect f]
-   (make-effect :map-ctx
-                prev-effect
-                (fn [value]
-                  (maybe-propagate-failure value
-                                           (f value *context*))))))
+   (->MapCtxEffect :map-ctx prev-effect {:f f} f)))
 
 (defn tap>
   "Executes a side-effecting function `f` on the successful value (e.g. logging or metrics)
@@ -153,12 +854,7 @@
   ([f]
    (tap> nil f))
   ([prev-effect f]
-   (make-effect :tap
-                prev-effect
-                (fn [value]
-                  (maybe-propagate-failure value
-                                           (f value)
-                                           value)))))
+   (->TapEffect :tap prev-effect {:f f} f)))
 
 (defn tap-error>
   "Executes a side-effecting function `f` on the failure (e.g. logging or metrics)
@@ -172,14 +868,7 @@
   ([f]
    (tap-error> nil f))
   ([prev-effect f]
-   (make-effect :tap-error
-                prev-effect
-                (fn [value]
-                  (if (failure? value)
-                    (do
-                      (f value)
-                      value)
-                    value)))))
+   (->TapErrorEffect :tap-error prev-effect {:f f} f)))
 
 (defn do-ctx>
   "Executes a side-effecting binary function `(f value context)` on the successful value and
@@ -193,26 +882,21 @@
   ([f]
    (do-ctx> nil f))
   ([prev-effect f]
-   (make-effect :do-ctx
-                prev-effect
-                (fn [value]
-                  (maybe-propagate-failure value
-                                           (f value *context*)
-                                           value)))))
+   (->DoCtxEffect :do-ctx prev-effect {:f f} f)))
 
 (defn context>
   "Creates an effect yielding the active execution context map or a value at `key`.
 
    Examples:
-     (fx/context>) ;; yields entire *context* map
-     (fx/context> :db) ;; yields (:db *context*)
-     (fx/context> :db default-db) ;; yields default-db if :db is absent in *context*"
+     (fx/context>) ;; yields entire context map
+     (fx/context> :db) ;; yields (:db context)
+     (fx/context> :db default-db) ;; yields default-db if :db is absent in context"
   ([]
-   (make-effect :context nil (fn [_] *context*)))
+   (->ContextEffect :context nil {} nil nil))
   ([key]
-   (make-effect :context nil (fn [_] (get *context* key))))
+   (->ContextEffect :context nil {:key key} key nil))
   ([key default-val]
-   (make-effect :context nil (fn [_] (get *context* key default-val)))))
+   (->ContextEffect :context nil {:key key :default default-val} key default-val)))
 
 (defn service>
   "Creates an effect extracting service `key` from the active execution context.
@@ -244,25 +928,9 @@
                                        (effect? b) [b a]
                                        (and (map? a) (not (effect? a))) [b a]
                                        :else [a b])]
-     (make-effect :provide
-                  nil
-                  (fn [value]
-                    (binding [*context* (assoc (merge *context* context-map) :runner (get *context* :runner run-sync!))]
-                      (if target-effect
-                        (let [eff (if (some? value)
-                                    (chain> (succeed> value) target-effect)
-                                    target-effect)]
-                          (-run! eff))
-                        value))))))
+     (->ProvideEffect :provide nil {:body target-effect :context-map context-map} target-effect context-map)))
   ([prev-effect body-effect context-map]
-   (make-effect :provide
-                prev-effect
-                (fn [value]
-                  (binding [*context* (assoc (merge *context* context-map) :runner (get *context* :runner run-sync!))]
-                    (let [eff (if (some? value)
-                                (chain> (succeed> value) body-effect)
-                                body-effect)]
-                      (-run! eff)))))))
+   (->ProvideEffect :provide prev-effect {:body body-effect :context-map context-map} body-effect context-map)))
 
 (defn provide-service>
   "Executes `effect` within a dynamic context where `key` is bound to `service-impl`.
@@ -297,79 +965,7 @@
   ([finalizer-effect]
    (ensure> nil finalizer-effect))
   ([prev-effect finalizer-effect]
-   (let [eff (if (effect? finalizer-effect)
-               finalizer-effect
-               (tap> finalizer-effect))]
-     (make-effect :ensure
-                  prev-effect
-                  (fn [value]
-                    (let [fin-input (if (failure? value) nil value)
-                          fin-eff (if (nil? (:prev-effect eff))
-                                    (chain> (succeed> fin-input) eff)
-                                    eff)
-                          fin-res (try
-                                    (-run! fin-eff)
-                                    (catch #?(:clj Throwable :cljs :default) e
-                                      (make-failure :ensure e)))]
-                      (cond
-                        (failure? fin-res) fin-res
-                        (failure? value) value
-                        :else value)))))))
-
-(defn- handle-try-exception [catch-handler e]
-  (cond
-    (nil? catch-handler)
-    (make-failure :try e)
-
-    (keyword? catch-handler)
-    (make-failure catch-handler e)
-
-    (effect? catch-handler)
-    (-run! (chain> (succeed> e) catch-handler))
-
-    (map? catch-handler)
-    (let [matched-handler (some (fn [[k handler]]
-                                  (cond
-                                    #?@(:clj [(and (class? k) (instance? k e)) handler])
-                                    (and (fn? k) (k e)) handler
-                                    (= k :default) handler
-                                    :else nil))
-                                catch-handler)]
-      (if matched-handler
-        (handle-try-exception matched-handler e)
-        (make-failure :try e)))
-
-    (ifn? catch-handler)
-    (let [res (catch-handler e)]
-      (if (failure? res)
-        res
-        (make-failure :try res)))
-
-    :else
-    (make-failure :try e)))
-
-(defn- eval-eff-or-fn
-  "Evaluates `eff-or-fn` passing `resource` if needed."
-  [eff-or-fn resource]
-  (cond
-    (effect? eff-or-fn)
-    (-run! (if (nil? (:prev-effect eff-or-fn))
-             (chain> (succeed> resource) eff-or-fn)
-             eff-or-fn))
-
-    (ifn? eff-or-fn)
-    (let [res (try
-                (eff-or-fn resource)
-                (catch #?(:clj clojure.lang.ArityException :cljs :default) _
-                  (eff-or-fn)))]
-      (if (effect? res)
-        (-run! (if (nil? (:prev-effect res))
-                 (chain> (succeed> resource) res)
-                 res))
-        res))
-
-    :else
-    eff-or-fn))
+   (->EnsureEffect :ensure prev-effect {:finalizer finalizer-effect} finalizer-effect)))
 
 (defn acquire-release>
   "Acquires a resource, runs `use-eff-fn`, and guarantees `release-eff-fn` executes
@@ -386,79 +982,23 @@
            (fn [conn] (run-queries> conn))
            (fn [conn] (close-conn> conn))))"
   ([use-eff-fn release-eff-fn]
-   (make-effect :acquire-release nil
-                (fn [value]
-                  (maybe-propagate-failure value
-                                           (if (nil? value)
-                                             nil
-                                             (let [use-res (try
-                                                             (eval-eff-or-fn use-eff-fn value)
-                                                             (catch #?(:clj Throwable :cljs :default) e
-                                                               (try (eval-eff-or-fn release-eff-fn value)
-                                                                    (catch #?(:clj Throwable :cljs :default) _ nil))
-                                                               (throw e)))
-                                                   rel-res (try
-                                                             (eval-eff-or-fn release-eff-fn value)
-                                                             (catch #?(:clj Throwable :cljs :default) e
-                                                               (make-failure :release-error e)))]
-                                               (cond
-                                                 (failure? use-res) use-res
-                                                 (failure? rel-res) rel-res
-                                                 :else use-res)))))))
+   (->AcquireReleaseEffect :acquire-release nil {:acquire nil :use use-eff-fn :release release-eff-fn} nil use-eff-fn release-eff-fn))
   ([acquire-eff use-eff-fn release-eff-fn]
-   (make-effect :acquire-release nil
-                (fn [value]
-                  (let [acq-eff (if (and (some? value) (effect? acquire-eff) (nil? (:prev-effect acquire-eff)))
-                                  (chain> (succeed> value) acquire-eff)
-                                  acquire-eff)
-                        resource (if (effect? acq-eff)
-                                   (-run! acq-eff)
-                                   (eval-eff-or-fn acq-eff value))]
-                    (if (failure? resource)
-                      resource
-                      (let [use-res (try
-                                      (eval-eff-or-fn use-eff-fn resource)
-                                      (catch #?(:clj Throwable :cljs :default) e
-                                        (try (eval-eff-or-fn release-eff-fn resource)
-                                             (catch #?(:clj Throwable :cljs :default) _ nil))
-                                        (throw e)))
-                            rel-res (try
-                                      (eval-eff-or-fn release-eff-fn resource)
-                                      (catch #?(:clj Throwable :cljs :default) e
-                                        (make-failure :release-error e)))]
-                        (cond
-                          (failure? use-res) use-res
-                          (failure? rel-res) rel-res
-                          :else use-res)))))))
+   (->AcquireReleaseEffect :acquire-release nil {:acquire acquire-eff :use use-eff-fn :release release-eff-fn} acquire-eff use-eff-fn release-eff-fn))
   ([prev-effect acquire-eff use-eff-fn release-eff-fn]
    (let [acq (if (effect? acquire-eff)
                (chain> prev-effect acquire-eff)
                acquire-eff)]
-     (acquire-release> acq use-eff-fn release-eff-fn))))
+     (->AcquireReleaseEffect :acquire-release nil {:acquire acq :use use-eff-fn :release release-eff-fn} acq use-eff-fn release-eff-fn))))
 
 (defn die>
   "Yields an effect that halts execution by throwing a fatal defect exception."
   ([]
    (die> "Effect defect encountered"))
   ([err]
-   (make-effect :die nil
-                (fn [_]
-                  (cond
-                    (instance? #?(:clj Throwable :cljs js/Error) err)
-                    (throw err)
-
-                    (string? err)
-                    (throw (ex-info err {:defect err}))
-
-                    (map? err)
-                    (throw (ex-info "Effect defect encountered" err))
-
-                    :else
-                    (throw (ex-info "Effect defect encountered" {:defect err}))))))
+   (->DieEffect :die nil {:err err} err nil nil))
   ([msg data]
-   (make-effect :die nil
-                (fn [_]
-                  (throw (ex-info msg data))))))
+   (->DieEffect :die nil {:msg msg :data data} nil msg data)))
 
 (defn or-die>
   "Converts any upstream domain failure into a fatal defect exception.
@@ -475,28 +1015,7 @@
   ([prev-effect]
    (or-die> prev-effect nil))
   ([prev-effect msg-or-fn]
-   (make-effect :or-die prev-effect
-                (fn [value]
-                  (if (failure? value)
-                    (let [val-map (failure->value value)
-                          err-data (error-data value)]
-                      (cond
-                        (fn? msg-or-fn)
-                        (let [res (msg-or-fn value)]
-                          (if (instance? #?(:clj Throwable :cljs js/Error) res)
-                            (throw res)
-                            (throw (ex-info (if (string? res) res "Effect terminated with fatal defect")
-                                            (if (map? res) res val-map)))))
-
-                        (string? msg-or-fn)
-                        (throw (ex-info msg-or-fn val-map))
-
-                        (instance? #?(:clj Throwable :cljs js/Error) err-data)
-                        (throw (ex-info "Effect terminated with fatal defect" val-map err-data))
-
-                        :else
-                        (throw (ex-info "Effect terminated with fatal defect" val-map))))
-                    value)))))
+   (->OrDieEffect :or-die prev-effect {:msg-or-fn msg-or-fn} msg-or-fn)))
 
 (defn match>
   "Converges failure and success channels by applying `on-failure` or `on-success`.
@@ -511,11 +1030,7 @@
   ([on-failure on-success]
    (match> nil on-failure on-success))
   ([prev-effect on-failure on-success]
-   (make-effect :match prev-effect
-                (fn [value]
-                  (if (failure? value)
-                    (eval-eff-or-fn on-failure value)
-                    (eval-eff-or-fn on-success value))))))
+   (->MatchEffect :match prev-effect {:on-failure on-failure :on-success on-success} on-failure on-success)))
 
 (defn or-else>
   "Executes `fallback-eff` if upstream evaluates to a failure.
@@ -523,20 +1038,11 @@
 
    Supports point-free pipeline usage:
      (-> (fetch-from-cache> id)
-         (fx/or-else> (fetch-from-remote-db> id)))
-
-     (-> (fetch-from-cache> id)
-         (fx/or-else> (fn [err] (fetch-from-remote-db> id))))"
+         (fx/or-else> (fetch-from-remote-db> id)))"
   ([fallback-eff]
    (or-else> nil fallback-eff))
   ([prev-effect fallback-eff]
-   (make-effect :or-else prev-effect
-                (fn [value]
-                  (if (failure? value)
-                    (eval-eff-or-fn fallback-eff value)
-                    value)))))
-
-
+   (->OrElseEffect :or-else prev-effect {:fallback fallback-eff} fallback-eff)))
 
 (defn or-else-fail>
   "Replaces any upstream failure with a new Failure having `tag` and `error-data`
@@ -550,69 +1056,24 @@
   ([a b]
    (if (keyword? a)
      (or-else-fail> nil a b)
-     (make-effect :or-else-fail a
-                  (fn [value]
-                    (if (failure? value)
-                      (if (failure? b)
-                        b
-                        (if (ifn? b)
-                          (let [res (b value)]
-                            (if (failure? res) res (make-failure :or-else-fail res)))
-                          (make-failure :or-else-fail b)))
-                      value)))))
+     (->OrElseFailEffect :or-else-fail a {:fallback-failure b} nil nil b)))
   ([prev-effect tag error-data]
-   (make-effect :or-else-fail prev-effect
-                (fn [value]
-                  (if (failure? value)
-                    (make-failure tag (if (fn? error-data) (error-data value) error-data))
-                    value)))))
+   (->OrElseFailEffect :or-else-fail prev-effect {:tag tag :error-data error-data} tag error-data nil)))
 
 (defn retry>
   "Retries an effect according to policy `{:max-attempts n :delay-ms ms :backoff-factor f :retry-if pred}`.
 
    Supports standalone execution and pipeline usage:
      (fx/retry> (flaky-effect) {:max-attempts 3 :delay-ms 100})
-     (-> (flaky-effect) (fx/retry> {:max-attempts 3 :delay-ms 100 :backoff-factor 2.0}))
-     (-> (succeed> id) (fx/retry> (fn [id] (fetch-user-by-id id)) {:max-attempts 3}))"
+     (-> (flaky-effect) (fx/retry> {:max-attempts 3 :delay-ms 100 :backoff-factor 2.0}))"
   ([policy]
    (retry> nil nil policy))
   ([target-or-policy policy-or-nil]
    (if (and (map? target-or-policy) (not (effect? target-or-policy)) (nil? policy-or-nil))
      (retry> nil nil target-or-policy)
-     (let [target-effect target-or-policy
-           policy (or policy-or-nil {})]
-       (make-effect :retry nil
-                    (fn [value]
-                      (let [eff (if (and (some? value) (effect? target-effect) (nil? (:prev-effect target-effect)))
-                                  (chain> (succeed> value) target-effect)
-                                  target-effect)]
-                        (loop [attempt 1
-                               curr-delay (long (get policy :delay-ms 0))]
-                          (let [res (eval-eff-or-fn eff value)]
-                            (if (and (failure? res)
-                                     (< attempt (get policy :max-attempts 3))
-                                     (if-let [pred (:retry-if policy)] (pred res) true))
-                              (do
-                                #?(:clj  (when (pos? curr-delay) (Thread/sleep curr-delay))
-                                   :cljs nil)
-                                (recur (inc attempt) (long (* curr-delay (get policy :backoff-factor 1.0)))))
-                              res)))))))))
+     (->RetryEffect :retry nil {:target target-or-policy :policy (or policy-or-nil {})} target-or-policy (or policy-or-nil {}))))
   ([prev-effect target-effect policy]
-   (make-effect :retry prev-effect
-                (fn [value]
-                  (loop [attempt 1
-                         curr-delay (long (get policy :delay-ms 0))]
-                    (let [res (eval-eff-or-fn target-effect value)]
-                      (if (and (failure? res)
-                               (< attempt (get policy :max-attempts 3))
-                               (if-let [pred (:retry-if policy)] (pred res) true))
-                        (do
-                          #?(:clj  (when (pos? curr-delay) (Thread/sleep curr-delay))
-                             :cljs nil)
-                          (recur (inc attempt) (long (* curr-delay (get policy :backoff-factor 1.0)))))
-                        res)))))))
-
-
+   (->RetryEffect :retry prev-effect {:target target-effect :policy (or policy {})} target-effect (or policy {}))))
 
 (defn try>
   "Creates an effect that executes an inner effect combinator, catching any thrown
@@ -646,22 +1107,10 @@
   ([prev-effect body-effect catch-handler]
    (let [eff (if (effect? body-effect)
                body-effect
-               (make-effect :try-body nil
-                            (fn [v]
-                              (if (fn? body-effect)
-                                (try
-                                  (body-effect v)
-                                  (catch #?(:clj clojure.lang.ArityException :cljs :default) _
-                                    (body-effect)))
-                                body-effect))))]
-     (make-effect :try
-                  prev-effect
-                  (fn [value]
-                    (maybe-propagate-failure value
-                                             (try
-                                               (-run! (chain> (succeed> value) eff))
-                                               (catch #?(:clj Throwable :cljs :default) e
-                                                 (handle-try-exception catch-handler e)))))))))
+               (if (fn? body-effect)
+                 (->TryFnEffect :try-fn nil {:f body-effect} body-effect)
+                 body-effect))]
+     (->TryEffect :try prev-effect {:body eff :catch catch-handler} eff catch-handler))))
 
 (defn all>
   "Combines a vector or sequence of independent effects into a single effect that returns
@@ -672,12 +1121,7 @@
                (fx/succeed> 2)])
      ;; => [1 2]"
   [effects]
-  (make-effect
-    :all
-    nil
-    (fn [_]
-      (->> effects
-           (mapv (fn [eff] (-run! eff)))))))
+  (->AllEffect :all nil {:effects (vec effects)} (vec effects)))
 
 (defn for-each>
   "Maps a collection through an effect-producing function `f-eff` and collects results into a vector.
@@ -691,36 +1135,10 @@
    (for-each> nil f-eff))
   ([a b]
    (if (and (or (sequential? a) (set? a) (nil? a)) (not (effect? a)))
-     (make-effect :for-each nil
-                  (fn [_]
-                    (reduce (fn [acc item]
-                              (let [res (eval-eff-or-fn b item)]
-                                (if (failure? res)
-                                  (reduced res)
-                                  (conj acc res))))
-                            []
-                            (or a []))))
-     (make-effect :for-each a
-                  (fn [value]
-                    (maybe-propagate-failure value
-                                             (reduce (fn [acc item]
-                                                       (let [res (eval-eff-or-fn b item)]
-                                                         (if (failure? res)
-                                                           (reduced res)
-                                                           (conj acc res))))
-                                                     []
-                                                     (or value [])))))))
+     (->ForEachEffect :for-each nil {:coll (vec a) :f b} (vec a) b)
+     (->ForEachEffect :for-each a {:coll nil :f b} nil b)))
   ([prev-effect coll f-eff]
-   (make-effect :for-each prev-effect
-                (fn [value]
-                  (maybe-propagate-failure value
-                                           (reduce (fn [acc item]
-                                                     (let [res (eval-eff-or-fn f-eff item)]
-                                                       (if (failure? res)
-                                                         (reduced res)
-                                                         (conj acc res))))
-                                                   []
-                                                   (or (if (some? coll) coll value) [])))))))
+   (->ForEachEffect :for-each prev-effect {:coll (when (some? coll) (vec coll)) :f f-eff} (when (some? coll) (vec coll)) f-eff)))
 
 (defn zip-with>
   "Evaluates two effects and combines their successful results using binary function `f`.
@@ -730,32 +1148,9 @@
      (fx/zip-with> (fetch-user> id) (fetch-perms> id)
                    (fn [u p] (assoc u :permissions p)))"
   ([eff-a eff-b f]
-   (make-effect :zip-with nil
-                (fn [value]
-                  (let [a (if (and (some? value) (effect? eff-a) (nil? (:prev-effect eff-a)))
-                            (chain> (succeed> value) eff-a)
-                            eff-a)
-                        res-a (eval-eff-or-fn a value)]
-                    (if (failure? res-a)
-                      res-a
-                      (let [b (if (and (some? value) (effect? eff-b) (nil? (:prev-effect eff-b)))
-                                (chain> (succeed> value) eff-b)
-                                eff-b)
-                            res-b (eval-eff-or-fn b value)]
-                        (if (failure? res-b)
-                          res-b
-                          (f res-a res-b))))))))
+   (->ZipWithEffect :zip-with nil {:eff-a eff-a :eff-b eff-b :f f} eff-a eff-b f))
   ([prev-effect eff-a eff-b f]
-   (make-effect :zip-with prev-effect
-                (fn [value]
-                  (maybe-propagate-failure value
-                                           (let [res-a (eval-eff-or-fn eff-a value)]
-                                             (if (failure? res-a)
-                                               res-a
-                                               (let [res-b (eval-eff-or-fn eff-b value)]
-                                                 (if (failure? res-b)
-                                                   res-b
-                                                   (f res-a res-b))))))))))
+   (->ZipWithEffect :zip-with prev-effect {:eff-a eff-a :eff-b eff-b :f f} eff-a eff-b f)))
 
 (defn zip>
   "Evaluates two effects and pairs their results into a 2-element vector `[res-a res-b]`.
@@ -778,16 +1173,7 @@
   ([inner-effect]
    (mapcat> nil inner-effect))
   ([prev-effect inner-effect]
-   (make-effect :mapcat
-                prev-effect
-                (fn [value]
-                  (maybe-propagate-failure value
-                                           (if (effect? inner-effect)
-                                             ; Maybe should eval with nil here?
-                                             (-run! (chain> (succeed> value)
-                                                            inner-effect))
-                                             (make-failure :mapcat>-result-not-an-effect
-                                                           {:result inner-effect})))))))
+   (->MapcatEffect :mapcat prev-effect {:inner-effect inner-effect} inner-effect)))
 
 (defn if>
   "Conditional branching combinator. Evaluates `cond-eff` with the current value:
@@ -802,16 +1188,7 @@
   ([cond-eff then-effect else-effect]
    (if> nil cond-eff then-effect else-effect))
   ([prev-effect cond-eff then-effect else-effect]
-   (make-effect :if
-                prev-effect
-                (fn [value]
-                  (maybe-propagate-failure value
-                                           (let [branch-eff (if (-run! (chain> (succeed> value)
-                                                                               cond-eff))
-                                                              then-effect
-                                                              else-effect)]
-                                             (-run! (chain> (succeed> value)
-                                                            branch-eff))))))))
+   (->IfEffect :if prev-effect {:cond cond-eff :then then-effect :else else-effect} cond-eff then-effect else-effect)))
 
 (defn cond>
   "Multi-branch conditional combinator. Takes paired test and expression effects:
@@ -828,20 +1205,8 @@
            (fx/map> odd?)  (fx/map> inc)
            (fx/map> even?) (fx/map> dec)))"
   [prev-effect & conditions]
-  (let [conditions (partition 2 conditions)]
-    (make-effect :cond
-                 prev-effect
-                 (fn [value]
-                   (maybe-propagate-failure value
-                                            (let [res-eff (loop [conditions conditions]
-                                                            (if-let [[test-eff expr-effect] (first conditions)]
-                                                              (if (-run! (chain> (succeed> value)
-                                                                                 test-eff))
-                                                                expr-effect
-                                                                (recur (rest conditions)))
-                                                              (fail> :cond :no-conditions)))]
-                                              (-run! (chain> (succeed> value)
-                                                             res-eff))))))))
+  (let [pairs (vec (partition 2 conditions))]
+    (->CondEffect :cond prev-effect {:conditions pairs} pairs)))
 
 (defn catch>
   "Catches specific failure tags using a handler map `f-map` of `{failure-tag handler-effect}`.
@@ -854,25 +1219,7 @@
   ([f-map]
    (catch> nil f-map))
   ([prev-effect f-map]
-   (make-effect :catch
-                prev-effect
-                (fn [value]
-                  (if (failure? value)
-                    (let [failure-tag (tag value)
-                          error-data (error-data value)
-                          f-effect (get f-map failure-tag)]
-                      (if f-effect
-                        ; maybe it should be (f value)
-                        (-run! (chain> (succeed> error-data)
-                                       f-effect))
-                        value))
-                    value)))))
-
-(defn failure->value
-  "Converts an IFailure instance into a plain map `{:tag ... :error-data ...}`."
-  [failure]
-  {:tag        (tag failure)
-   :error-data (error-data failure)})
+   (->CatchEffect :catch prev-effect {:handlers f-map} f-map)))
 
 (defn catchall>
   "Catches any failure and routes its map representation `{:tag ... :error-data ...}` as input
@@ -884,48 +1231,70 @@
   ([inner-effect]
    (catchall> nil inner-effect))
   ([prev-effect inner-effect]
-   (make-effect :catch-all
-                prev-effect
-                (fn [value]
-                  (if (failure? value)
-                    (-run! (chain> (succeed> (failure->value value))
-                                   inner-effect))
-                    value)))))
-
-(defn run-sync!
-  "Synchronously evaluates an effect pipeline from root to leaf and returns the final value
-   or failure. Binds `*context*` with optional initial `context` (or merged with active context)
-   and ensures `:runner run-sync!` is present during execution.
-
-   Examples:
-     (fx/run-sync! (fx/succeed> 42))
-     ;; => 42
-
-     (fx/run-sync! (fx/service> :db) {:db mock-db})
-     ;; => mock-db"
-  ([effect]
-   (run-sync! effect {}))
-  ([effect context]
-   (binding [*context* (assoc (merge *context* context) :runner run-sync!)]
-     (->> effect
-          (iterate prev-effect)
-          (take-while some?)
-          (reverse)
-          (reduce (fn [acc effect]
-                    (-eval! effect acc))
-                  nil)))))
+   (->CatchallEffect :catch-all prev-effect {:inner-effect inner-effect} inner-effect)))
 
 (defn sleep>
   "Creates an effect that pauses evaluation for `ms` milliseconds and propagates upstream value."
   ([ms]
    (sleep> nil ms))
   ([prev-effect ms]
-   (make-effect :sleep prev-effect
-                (fn [value]
-                  (maybe-propagate-failure value
-                                           #?(:clj  (when (pos? ms) (Thread/sleep ms))
-                                              :cljs nil)
-                                           value)))))
+   (->SleepEffect :sleep prev-effect {:ms ms} ms)))
+
+;; ---------------------------------------------------------------------------
+;; Exception Unwinding Helper
+;; ---------------------------------------------------------------------------
+
+(defn- unwind-for-exception [stack e]
+  (loop [s stack]
+    (if (empty? s)
+      nil
+      (let [[frame & rest-s] s]
+        (if #?(:clj  (instance? com.lambdaseq.fx.core.IUnwindable frame)
+               :cljs (satisfies? IUnwindable frame))
+          (if-let [res (-unwind frame e rest-s)]
+            res
+            (recur rest-s))
+          (recur rest-s))))))
+
+;; ---------------------------------------------------------------------------
+;; Runtime Evaluation Engine
+;; ---------------------------------------------------------------------------
+
+(defn run-sync!
+  "Synchronously evaluates an effect pipeline from root to leaf and returns the final value
+   or failure. Binds execution with optional initial `context` map."
+  ([effect]
+   (run-sync! effect {}))
+  ([root-effect initial-context]
+   (let [ctx (assoc (or initial-context {}) :runner run-sync!)]
+     (loop [curr-eff root-effect
+            curr-val nil
+            curr-ctx ctx
+            stack    ()]
+       (if (nil? curr-eff)
+         (if (empty? stack)
+           curr-val
+           (let [[frame & rest-stack] stack
+                 [next-eff next-val next-ctx next-stack]
+                 (try
+                   (-resume frame curr-val curr-ctx rest-stack)
+                   (catch #?(:clj Throwable :cljs :default) e
+                     (if-let [unwind-info (unwind-for-exception stack e)]
+                       (if-let [eff (:effect unwind-info)]
+                         [eff nil (:context unwind-info) (:rest-stack unwind-info)]
+                         [nil (:value unwind-info) (:context unwind-info) (:rest-stack unwind-info)])
+                       (throw e))))]
+             (recur next-eff next-val next-ctx next-stack)))
+         (let [[next-eff next-val next-ctx next-stack]
+               (try
+                 (-step curr-eff curr-val curr-ctx stack)
+                 (catch #?(:clj Throwable :cljs :default) e
+                   (if-let [unwind-info (unwind-for-exception stack e)]
+                     (if-let [eff (:effect unwind-info)]
+                       [eff nil (:context unwind-info) (:rest-stack unwind-info)]
+                       [nil (:value unwind-info) (:context unwind-info) (:rest-stack unwind-info)])
+                     (throw e))))]
+           (recur next-eff next-val next-ctx next-stack)))))))
 
 (defn run-async!
   "Asynchronously evaluates an effect pipeline returning a java.util.concurrent.CompletableFuture (Clojure)
@@ -939,11 +1308,13 @@
   ([effect context]
    #?(:clj
       (CompletableFuture/supplyAsync
-        #(run-sync! effect context))
+        (reify Supplier
+          (get [_]
+            (run-sync! effect context))))
       :cljs
       (js/Promise.
         (fn [resolve reject]
-            (try
-              (resolve (run-sync! effect context))
-              (catch :default e
-                (reject e))))))))
+          (try
+            (resolve (run-sync! effect context))
+            (catch :default e
+              (reject e))))))))

@@ -4,15 +4,14 @@
             [com.lambdaseq.fx.core :refer :all]))
 
 (deftest make-effect-test
-  (let [run (constantly 1)
-        eff (make-effect :test nil run)]
+  (let [eff (make-effect :test nil {:a 1})]
     (testing "Return value of make-effect is a valid effect"
       (is (effect? eff)))
     (testing "Effect tag is correct"
       (is (= :test (:tag eff)))
       (is (= :test (tag eff))))
-    (testing "Effect run function is correct"
-      (is (= 1 (run-sync! eff))))))
+    (testing "Effect data is accessible"
+      (is (= {:a 1} (:data eff))))))
 
 (deftest make-failure-test
   (let [err-data {:a 1}
@@ -26,7 +25,7 @@
       (is (= err-data (error-data fail))))))
 
 (deftest maybe-propagate-failure-test
-  (let [eff (make-effect :test nil (constantly 1))
+  (let [eff (make-effect :test nil {:a 1})
         fail (make-failure :test {:a 1})
         res (maybe-propagate-failure eff 1)
         res-fail (maybe-propagate-failure fail 1)]
@@ -34,16 +33,6 @@
       (is (= 1 res)))
     (testing "Returns failure if a failure"
       (is (= fail res-fail)))))
-
-(deftest maybe-propagate-effect-test
-  (let [eff (make-effect :test nil (constantly 1))
-        fail (make-failure :test {:a 1})
-        res (maybe-propagate-effect eff 2)
-        res-fail (maybe-propagate-effect fail 2)]
-    (testing "Returns value if not an effect"
-      (is (= eff res)))
-    (testing "Returns effect if an effect"
-      (is (= 2 res-fail)))))
 
 (deftest succeed>-test
   (let [eff (succeed> 1)]
@@ -184,10 +173,10 @@
       (is (failure? res))
       (is (= :ensure (:tag res)))
       (is (instance? #?(:clj Throwable :cljs :default) (error-data res)))))
-  (testing "ensure> accepts plain function as finalizer"
+  (testing "ensure> executes effect finalizer preserving upstream value"
     (let [cleaned (atom false)
           res (-> (succeed> "hello")
-                  (ensure> (fn [_] (reset! cleaned true)))
+                  (ensure> (tap> (fn [_] (reset! cleaned true))))
                   (run-sync!))]
       (is (= "hello" res))
       (is (true? @cleaned))))
@@ -683,7 +672,7 @@
 (deftest try>-exception-mapping-test
   (testing "try> maps specific exception types using map handler"
     #?(:clj
-       (let [res (-> (try> (fn [] (throw (java.io.IOException. "disk full")))
+       (let [res (-> (try> (map> (fn [_] (throw (java.io.IOException. "disk full"))))
                            {java.io.IOException :io-failure
                             ArithmeticException :math-failure})
                      (run-sync!))]
@@ -717,7 +706,7 @@
   (testing "or-else> skips fallback effect when upstream succeeds"
     (let [called (atom false)
           res (-> (succeed> {:user "Alice"})
-                  (or-else> (fn [_] (reset! called true) (succeed> {:user "default"})))
+                  (or-else> (tap> (fn [_] (reset! called true))))
                   (run-sync!))]
       (is (= {:user "Alice"} res))
       (is (false? @called)))))
@@ -740,22 +729,20 @@
 (deftest retry>-test
   (testing "retry> succeeds on subsequent attempt after transient failure"
     (let [attempts (atom 0)
-          flaky-eff (make-effect :flaky nil
-                      (fn [_]
-                        (let [n (swap! attempts inc)]
-                          (if (< n 3)
-                            (make-failure :transient-error {:attempt n})
-                            {:status :ok :attempts n}))))
+          flaky-eff (map> (fn [_]
+                            (let [n (swap! attempts inc)]
+                              (if (< n 3)
+                                (make-failure :transient-error {:attempt n})
+                                {:status :ok :attempts n}))))
           res (run-sync! (retry> flaky-eff {:max-attempts 4 :delay-ms 1}))]
       (is (= {:status :ok :attempts 3} res))
       (is (= 3 @attempts))))
 
   (testing "retry> exhausts attempts and returns final failure"
     (let [attempts (atom 0)
-          always-fail (make-effect :fail nil
-                        (fn [_]
-                          (swap! attempts inc)
-                          (make-failure :persistent-error {:count @attempts})))
+          always-fail (map> (fn [_]
+                              (swap! attempts inc)
+                              (make-failure :persistent-error {:count @attempts})))
           res (run-sync! (retry> always-fail {:max-attempts 3 :delay-ms 1}))]
       (is (failure? res))
       (is (= :persistent-error (:tag res)))
@@ -763,10 +750,9 @@
 
   (testing "retry> respects :retry-if predicate"
     (let [attempts (atom 0)
-          selective-fail (make-effect :fail nil
-                           (fn [_]
-                             (swap! attempts inc)
-                             (make-failure :fatal-unrecoverable {})))
+          selective-fail (map> (fn [_]
+                                 (swap! attempts inc)
+                                 (make-failure :fatal-unrecoverable {})))
           res (run-sync!
                 (retry> selective-fail
                   {:max-attempts 5
@@ -817,7 +803,7 @@
     (let [called-b (atom false)
           res (run-sync!
                 (zip> (fail> :error-a {:code 1})
-                      (make-effect :b nil (fn [_] (reset! called-b true) 2))))]
+                      (map> (fn [_] (reset! called-b true) 2))))]
       (is (failure? res))
       (is (= :error-a (:tag res)))
       (is (false? @called-b))))
@@ -846,3 +832,130 @@
                                      (map> inc)))]
       #?(:clj  (is (= 101 (.get ^java.util.concurrent.CompletableFuture res-future)))
          :cljs (is (some? res-future))))))
+
+(deftest ast-transparency-test
+  (testing "All effect records expose transparent :tag, :prev-effect, and :data map"
+    (let [m (map> inc)
+          r (retry> m {:max-attempts 5 :delay-ms 50})
+          s (service> :db :default-db)
+          p (provide> s {:db "mock"})
+          e (ensure> m (succeed> :done))]
+      (is (= :map (:tag m)))
+      (is (nil? (:prev-effect m)))
+      (is (= inc (:f (:data m))))
+
+      (is (= :retry (:tag r)))
+      (is (= {:max-attempts 5 :delay-ms 50} (:policy (:data r))))
+      (is (= m (:target (:data r))))
+
+      (is (= :context (:tag s)))
+      (is (= :db (:key (:data s))))
+      (is (= :default-db (:default (:data s))))
+
+      (is (= :provide (:tag p)))
+      (is (= s (:body (:data p))))
+      (is (= {:db "mock"} (:context-map (:data p))))
+
+      (is (= :ensure (:tag e)))
+      (is (= m (:prev-effect e)))
+      (is (= (succeed> :done) (:finalizer (:data e)))))))
+
+(deftest pure-context-propagation-test
+  (testing "Context is explicitly passed and isolated across nested provide> scopes"
+    (let [nested-eff
+          (-> (service> :tier)
+              (provide> {:tier :outer})
+              (map> (fn [outer-val]
+                      (-> (service> :tier)
+                          (provide> {:tier :inner})
+                          (map> (fn [inner-val]
+                                  [outer-val inner-val])))))
+              (mapcat> identity))]
+      (is (= [:outer :inner] (run-sync! nested-eff)))))
+
+  (testing "provide> restores parent context after child block terminates"
+    (let [log (atom [])
+          eff (-> (-> (service> :auth)
+                      (do-ctx> (fn [v ctx] (swap! log conj [:inside v (:auth ctx)]))))
+                  (provide> {:auth :elevated})
+                  (do-ctx> (fn [v ctx] (swap! log conj [:outside v (:auth ctx)])))
+                  (map-ctx> (fn [_ ctx] (:auth ctx))))
+          final-ctx (run-sync! eff {:auth :standard})]
+      (is (= :standard final-ctx))
+      (is (= [[:inside :elevated :elevated]
+              [:outside :elevated :standard]]
+             @log))))
+
+  (testing "Multiple parallel services in context"
+    (let [eff (zip-with> (service> :host) (service> :port) (fn [h p] (str h ":" p)))
+          res (run-sync! eff {:host "localhost" :port 8080})]
+      (is (= "localhost:8080" res)))))
+
+(deftest stack-safety-deep-pipeline-test
+  (testing "100,000-step linear pipeline executes in constant JVM stack space without StackOverflowError"
+    (let [pipeline (reduce (fn [eff _] (map> eff inc))
+                           (succeed> 0)
+                           (range 100000))
+          res (run-sync! pipeline)]
+      (is (= 100000 res))))
+
+  (testing "Deeply nested recursive mapcat> pipeline executes safely"
+    (let [build-chain (fn build-chain [n]
+                        (if (zero? n)
+                          (succeed> 0)
+                          (-> (succeed> 1)
+                              (mapcat> (fn [x]
+                                         (-> (build-chain (dec n))
+                                             (map> (fn [acc] (+ x acc)))))))))
+          res (run-sync! (build-chain 5000))]
+      (is (= 5000 res))))
+
+  (testing "Deeply nested if> conditional tree executes safely"
+    (let [build-if-tree (fn build-if-tree [n]
+                          (if (zero? n)
+                            (succeed> :bottom)
+                            (if> (succeed> true)
+                                 (build-if-tree (dec n))
+                                 (succeed> :wrong))))
+          res (run-sync! (build-if-tree 5000))]
+      (is (= :bottom res)))))
+
+(defrecord CustomMultiplierFrame [factor]
+  IContinuation
+  (-resume [_ val context stack]
+    [nil (* val factor) context stack]))
+
+(defrecord CustomMultiplyEffect [prev factor]
+  ITagged
+  (tag [_] :custom-multiply)
+  IEffect
+  (prev-effect [_] prev)
+  (-step [this val context stack]
+    (if (some? prev)
+      [prev val context (conj stack (->StepEffectFrame (assoc this :prev nil)))]
+      [nil val context (conj stack (->CustomMultiplierFrame factor))])))
+
+(deftest continuation-protocol-extensibility-test
+  (testing "Custom effect record and continuation frame integrate seamlessly into run-sync!"
+    (let [eff (-> (succeed> 10)
+                  (->CustomMultiplyEffect 5)
+                  (map> inc))]
+      (is (= 51 (run-sync! eff)))))
+
+  (testing "Unwindable frames clean up resources during exceptions in inner effect pipelines"
+    (let [released (atom false)
+          eff (acquire-release>
+                (succeed> :resource)
+                (fn [_] (map> (fn [_] (throw (ex-info "Simulated defect" {:boom true})))))
+                (fn [_] (reset! released true)))]
+      (is (thrown? Exception (run-sync! eff)))
+      (is (true? @released))))
+
+  (testing "Unwindable frames clean up resources during direct exceptions in use function"
+    (let [released (atom false)
+          eff (acquire-release>
+                (succeed> :resource)
+                (fn [_] (throw (ex-info "Direct defect" {:boom true})))
+                (fn [_] (reset! released true)))]
+      (is (thrown? Exception (run-sync! eff)))
+      (is (true? @released)))))

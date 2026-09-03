@@ -33,31 +33,31 @@
 
 (deftest make-effect-ann--test
   (testing "make-effect returns an effect"
-    (is-tc-e (fx/make-effect :foo nil (constantly 1))
+    (is-tc-e (fx/make-effect :foo nil {:val 1})
              (fx/IEffect t/Nothing Long nil '{})
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]])
-    (is-tc-e (fx/make-effect :foo nil (constantly "str"))
+    (is-tc-e (fx/make-effect :foo nil {:val "str"})
              (fx/IEffect t/Nothing (t/Val "str") t/Nothing '{})
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]]))
   (testing "type-checks with a previous effect"
     (is-tc-e (fx/make-effect :foo
-               (fx/make-effect :bar nil (constantly 1))
-               inc)
+               (fx/make-effect :bar nil {:val 1})
+               {:f inc})
              (fx/IEffect Long Long t/Nothing '{})
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]])
     (is-tc-e (fx/make-effect :foo
-               (fx/make-effect :bar nil (constantly "10"))
-               parse-long)
+               (fx/make-effect :bar nil {:val "10"})
+               {:f parse-long})
              (fx/IEffect String (t/Option Long) t/Nothing '{})
              :requires [[com.lambdaseq.fx.core :as fx]
                         [com.lambdaseq.fx.typed]]))
   (testing "type-checks with a previous effect and a failure"
     (is-tc-e (fx/make-effect :foo
                (fx/fail> :ok)
-               identity)
+               {:f identity})
              (fx/IEffect
                nil nil
                (fx/IFailure (t/Val :fail) (t/Val :ok))
@@ -66,7 +66,7 @@
                         [com.lambdaseq.fx.typed]])
     (is-tc-e (fx/make-effect :foo
                (fx/fail> :bar)
-               some?)
+               {:f some?})
              (fx/IEffect
                nil Boolean
                (fx/IFailure (t/Val :fail) (t/Val :bar))
