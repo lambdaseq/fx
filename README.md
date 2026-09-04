@@ -418,6 +418,122 @@ guaranteed to be released even if exceptions or failures occur:
 ;; => 101
 ```
 
+### Defining Custom Effects
+
+There are two primary ways to define your own effects in `fx`:
+
+#### 1. Composing Built-in Primitives (High-Level)
+
+The simplest and most idiomatic approach is to compose existing constructors and combinators (`succeed>`, `fail>`, `service>`, `try>`, `map>`, `mapcat>`, `tap>`, etc.) into domain-specific functions.
+
+##### Custom Effect Constructors
+
+Constructors return a new `Effect` from input parameters:
+
+```clojure
+(defn fetch-user> [user-id]
+  (-> (fx/service> :db)
+      (fx/mapcat> (fn [db]
+                    (fx/try> (fx/map> (fn [_] ((:query db) "SELECT * FROM users WHERE id = ?" user-id)))
+                             :db-error)))))
+
+;; Usage:
+(-> (fetch-user> 42)
+    (fx/run-sync! {:db mock-db}))
+```
+
+##### Custom Pipeline Combinators
+
+Combinators transform an upstream effect within a `->` threading pipeline. Provide multi-arity definitions supporting both trailing `([args...])` and threaded `([prev-eff args...])` positions:
+
+```clojure
+(defn log-stage>
+  ([stage-name]
+   (log-stage> nil stage-name))
+  ([prev-eff stage-name]
+   (-> prev-eff
+       (fx/tap> (fn [v] (println (str "[" stage-name "] Success:") v)))
+       (fx/tap-error> (fn [err] (println (str "[" stage-name "] Failure:") (fx/tag err)))))))
+
+;; Usage:
+(-> (fx/succeed> 100)
+    (log-stage> "calculation")
+    (fx/map> inc)
+    (fx/run-sync!))
+;; Prints: "[calculation] Success: 100"
+;; => 101
+```
+
+#### 2. Implementing Custom AST Effect Records (Low-Level)
+
+When you need custom execution semantics, first-class AST transparency, or dedicated continuation frames in the stack-safe interpreter loop, define a custom record implementing `ITagged` and `IEffect`.
+
+##### Core Protocols
+
+- **`ITagged`**: Returns the keyword identifying the effect node via `(tag [this])`.
+- **`IEffect`**:
+  - `(prev-effect [this])`: Returns the upstream effect or `nil`.
+  - `(-step [this val context stack])`: Executes one evaluation step and returns a 4-tuple vector: `[next-effect next-val next-context next-stack]`.
+    - If `prev-effect` is present: pushes a `StepEffectFrame` onto `stack` to evaluate upstream first:
+      `[prev-effect val context (conj stack (fx/->StepEffectFrame (assoc this :prev-effect nil)))]`
+    - If `(fx/failure? val)` is true: short-circuits and propagates the failure:
+      `[nil val context stack]`
+    - Otherwise: computes the new value or state and returns:
+      `[nil result context stack]`
+
+##### Example: Custom Multiplier Effect
+
+```clojure
+(defrecord MultiplyEffect [tag prev-effect data factor]
+  fx/ITagged
+  (tag [_] tag)
+  fx/IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (fx/->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (fx/failure? val)
+        [nil val context stack]
+        [nil (* val factor) context stack]))))
+
+(defn multiply>
+  "Multiplies the pipeline value by `factor`."
+  ([factor]
+   (multiply> nil factor))
+  ([prev-eff factor]
+   (->MultiplyEffect :multiply prev-eff {:factor factor} factor)))
+
+;; Usage:
+(-> (fx/succeed> 10)
+    (multiply> 5)
+    (fx/map> inc)
+    (fx/run-sync!))
+;; => 51
+```
+
+##### Custom Continuation Frames with `IContinuation`
+
+For multi-step computations or deferred execution across frames, define a continuation record implementing `IContinuation` and resume via `(-resume [this value context stack])`:
+
+```clojure
+(defrecord CustomMultiplierFrame [factor]
+  fx/IContinuation
+  (-resume [_ val context stack]
+    [nil (* val factor) context stack]))
+
+(defrecord CustomMultiplyEffect [tag prev-effect data factor]
+  fx/ITagged
+  (tag [_] tag)
+  fx/IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (fx/->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (fx/failure? val)
+        [nil val context stack]
+        [nil val context (conj stack (->CustomMultiplierFrame factor))]))))
+```
+
 ## Pipeline Metaprogramming & Utilities (`com.lambdaseq.fx.utils`)
 
 Because FX effects are 100% transparent data records, `com.lambdaseq.fx.utils` allows you to inspect, query, transform,

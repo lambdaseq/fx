@@ -198,3 +198,63 @@ The `modules/fx-typed` module provides Typed Clojure annotations for all effect 
 
 (t/ann fetch-data (fx/IEffect t/Any String (t/Option (fx/IFailure (t/Val :not-found) t/Any)) '{:db t/Any}))
 ```
+
+---
+
+## 7. Defining Custom Effects & Continuation Frames
+
+Because `fx` is protocol-driven rather than interpreter-table-driven, extending the system with custom effects does not require patching the core runner.
+
+### Implementing `IEffect`
+
+Every custom effect record must implement:
+1. `ITagged`: `(tag [this])` returning a descriptive keyword.
+2. `IEffect`:
+   - `(prev-effect [this])`: returns `:prev-effect` or `nil`.
+   - `(-step [this val context stack])`: returns `[next-effect next-val next-context next-stack]`.
+
+```clojure
+(defrecord MultiplyEffect [tag prev-effect data factor]
+  fx/ITagged
+  (tag [_] tag)
+  fx/IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      ;; Push StepEffectFrame to evaluate upstream effect first
+      [prev-effect val context (conj stack (fx/->StepEffectFrame (assoc this :prev-effect nil)))]
+      ;; Evaluate step: short-circuit on failure or compute result
+      (if (fx/failure? val)
+        [nil val context stack]
+        [nil (* val factor) context stack]))))
+
+(defn multiply>
+  ([factor] (multiply> nil factor))
+  ([prev-eff factor]
+   (->MultiplyEffect :multiply prev-eff {:factor factor} factor)))
+```
+
+### Implementing `IContinuation` and `IUnwindable`
+
+When an effect needs to suspend its own computation and wait for an inner effect or sub-pipeline to complete:
+
+```clojure
+(defrecord MultiplierFrame [factor]
+  fx/IContinuation
+  (-resume [_ val context stack]
+    [nil (* val factor) context stack]))
+```
+
+Continuation frames that manage resources can also implement `IUnwindable` to ensure cleanup during unhandled exceptions:
+
+```clojure
+(defrecord ResourceCleanupFrame [resource release-fn]
+  fx/IContinuation
+  (-resume [_ val context stack]
+    (release-fn resource)
+    [nil val context stack])
+  fx/IUnwindable
+  (-unwind [_ exception rest-stack]
+    (release-fn resource)
+    nil))
+```
