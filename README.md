@@ -2,9 +2,10 @@
 
 A lightweight, purely functional effect system for Clojure and ClojureScript inspired by Effect-ts and ZIO.
 
-`fx` models synchronous and asynchronous computations, resource lifecycles, and failure channels as pure, transparent
-data structures composed with Clojure's thread-first (`->`) macro. Pipelines short-circuit automatically on failure,
-manage resources safely, execute in constant JVM stack space, and evaluate only when explicitly triggered.
+`fx` models synchronous and asynchronous computations, resource lifecycles, dependency injection, and failure channels
+as pure, transparent data structures composed with Clojure's standard thread-first (`->`) macro. Pipelines short-circuit
+automatically on failure, manage resources safely, execute in constant stack space, and evaluate only when explicitly
+triggered.
 
 ## Installation
 
@@ -36,20 +37,49 @@ Functions that create or transform effects end in `>`, and functions that execut
 ;; => 42
 ```
 
+### Naming Conventions
+
+- `>` suffix: Effect constructors, combinators, and pipeline transforms (e.g., `succeed>`, `fail>`, `map>`, `catch>`).
+- `!` suffix: Execution runners that trigger evaluation and side effects (e.g., `run-sync!`, `run-async!`).
+- `?` suffix: Standard boolean predicates (e.g., `effect?`, `failure?`).
+
+## Philosophy
+
+`fx` is built around a few guiding principles:
+
+- **Programs as Data**: Workflows are represented as transparent, immutable data records rather than opaque closures.
+  Pipelines can be inspected, queried, transformed, and mocked with pure functions before execution.
+- **Explicitness over Magic**: No hidden dynamic vars, implicit coercions, or surprise runtime behavior. Dependencies,
+  failure paths, and evaluation boundaries are declared explicitly.
+- **Idiomatic Clojure**: Bring the reliability and safety of modern effect systems (like Effect-ts and ZIO) into Clojure
+  without alien DSLs, composing naturally with standard threading (`->`) and data structures.
+- **Pure Descriptions at the Core, Execution at the Edge**: Business logic remains completely pure and inert until
+  evaluated at the application boundary.
+
 ## Mental Model
 
-- **100% Transparent Data AST**: Effects are immutable `defrecord` instances exposing `:tag`, `:prev-effect`, and
-  explicit parameters (`:f`, `:policy`, `:target`, etc.), enabling programmatic inspection, mocking, and optimization.
-- **Deterministic Monomorphic Contracts**: Strict argument typing across all combinators (pure functions vs `Effect`
-  records) with zero dynamic coercion overhead.
-- **Thread-First Composition**: Effects chain naturally with standard Clojure `->` threading.
-- **Two Output Channels**: Pipelines yield either a success value or a structured, typed `Failure` record.
-- **Automatic Short-Circuiting**: On failure, downstream transformation steps are skipped automatically.
-- **Stack-Safe Continuation Interpreter**: Evaluation runs in constant $O (1)$ JVM stack space via heap-allocated
-  continuation frames (`-step`, `-resume`, `-unwind`), eliminating `StackOverflowError` on deeply nested or recursive
-  pipelines.
-- **Pure Context Threading**: Environmental dependencies and services are passed explicitly as pure immutable maps.
-- **Explicit Execution**: Pipelines stay inert until evaluated with `run-sync!` or `run-async!`.
+If you are new to effect systems, think of `fx` as a way to build robust, predictable programs by separating the
+description of what your program does from its actual execution:
+
+- **Descriptions over actions (Programs as Data)**: When you write `(fx/succeed> 10)` or `(fx/map> inc)`, you are not
+  running operations immediately. Instead, you are building an immutable, data-driven blueprint of your workflow. This
+  means you can pass workflows around, inspect them, or replace steps in tests before running anything.
+- **Execution happens at the edge**: Pipelines remain completely inert until you explicitly run them with `fx/run-sync!`
+  or `fx/run-async!`. This keeps your business logic pure and predictable.
+- **Standard Clojure threading (`->`)**: Effects chain sequentially using Clojure's familiar thread-first macro (`->`),
+  transforming values step by step.
+- **Two distinct channels (Success vs. Failure)**: Computations result in either a successful value or a structured
+  `Failure` record (with a `:tag` and error payload). You handle business errors as explicit data rather than throwing
+  and catching exceptions.
+- **Automatic short-circuiting**: If any step in a pipeline fails, downstream transformations (`map>`, `mapcat>`) are
+  automatically skipped, and the failure flows straight to your error handlers (`catch>`, `or-else>`) or caller.
+- **Pure dependency injection (Context)**: Steps declare what environment dependencies they need (such as a database
+  pool or config map) via `service>` or `context>`. You provide these dependencies at run time via `provide>` or
+  `run-sync!`, eliminating global state and dynamic vars.
+- **Guaranteed resource safety**: Built-in primitives manage resource lifecycles (`acquire-release>`), guaranteed
+  cleanup (`ensure>`), exception trapping (`try>`), and retrying transient errors (`retry>`).
+- **Stack safe by design**: Pipelines execute using a heap-allocated loop rather than consuming the JVM or JS call
+  stack. Deeply nested or long-running chains will never trigger a `StackOverflowError`.
 
 ## API Overview
 
