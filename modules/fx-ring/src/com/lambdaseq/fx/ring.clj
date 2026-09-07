@@ -1,0 +1,128 @@
+(ns com.lambdaseq.fx.ring
+  (:require [com.lambdaseq.fx.core :as fx])
+  (:import (clojure.lang ArityException)
+           (java.util.concurrent CompletableFuture)
+           (java.util.function BiConsumer)))
+
+(def request-key :com.lambdaseq.fx.ring/request)
+
+(defn build-fx-context
+  "Constructs the execution context map for an effect run.
+   Merges resolved provider/services with {request-key req}."
+  [req opts]
+  (let [provider (or (:provider opts) (:context opts) (:services opts))
+        provided-ctx (cond
+                       (fn? provider)  (try
+                                         (provider req)
+                                         (catch Throwable t
+                                           (throw (ex-info "Exception in context provider" {:request req} t))))
+                       (map? provider) provider
+                       :else           {})]
+    (merge (or provided-ctx {}) {request-key req})))
+
+(defn- default-fallback-handler [failure _req]
+  (let [err (fx/error-data failure)]
+    {:status  500
+     :headers {}
+     :body    (if (map? err)
+                (or (:message err) "Internal Server Error")
+                (str (or err "Internal Server Error")))}))
+
+(defn- invoke-failure-handler [h data req]
+  (cond
+    (fn? h)
+    (try
+      (h data req)
+      (catch ArityException _
+        (h data)))
+
+    (map? h)
+    h
+
+    :else
+    {:status 500 :body "Internal Server Error"}))
+
+(defn resolve-failure-to-response
+  "Converts an IFailure into an HTTP Ring response map using a hybrid resolution strategy:
+   1. Check :failure-map for explicit tag match.
+   2. Check if error-data contains :status key.
+   3. Fallback to :default-handler (or default 500 response)."
+  ([failure req]
+   (resolve-failure-to-response failure req nil))
+  ([failure req {:keys [failure-map default-handler]}]
+   (if-not (fx/failure? failure)
+     failure
+     (let [t (fx/tag failure)
+           data (fx/error-data failure)]
+       (cond
+         (and failure-map (contains? failure-map t))
+         (invoke-failure-handler (get failure-map t) data req)
+
+         (and (map? data) (contains? data :status) (integer? (:status data)))
+         (let [status-code (:status data)
+               headers (get data :headers {})
+               body (if (contains? data :body)
+                      (:body data)
+                      (dissoc data :status :headers))]
+           {:status  status-code
+            :headers headers
+            :body    (if (and (map? body) (empty? body)) nil body)})
+
+         (some? default-handler)
+         (invoke-failure-handler default-handler failure req)
+
+         :else
+         (default-fallback-handler failure req))))))
+
+(defn wrap-fx-failures
+  "Converts IFailure instances returned by a Ring handler to Ring HTTP responses.
+   Options:
+     :failure-map     - Map of tag -> (fn [error-data req]) or (fn [error-data]) or response-map
+     :default-handler - Fallback (fn [failure req]) returning a response map"
+  ([handler]
+   (wrap-fx-failures handler nil))
+  ([handler opts]
+   (fn
+     ([req]
+      (let [res (handler req)]
+        (resolve-failure-to-response res req opts)))
+     ([req respond raise]
+      (try
+        (handler req
+                 (fn [res]
+                   (respond (resolve-failure-to-response res req opts)))
+                 raise)
+        (catch Throwable t
+          (raise t)))))))
+
+(defn wrap-fx
+  "Converts a pure IEffect pipeline into a standard Ring HTTP handler.
+   Supports 1-arity synchronous (fn [req]) and 3-arity asynchronous (fn [req respond raise]).
+
+   Options:
+     :provider        - Map or (fn [req]) providing external dependencies / services
+     :context         - Alias for :provider
+     :services        - Alias for :provider
+     :failure-map     - Map of failure tags to handler functions (fn [error-data req])
+     :default-handler - Fallback failure handler function (fn [failure req])"
+  ([effect]
+   (wrap-fx effect nil))
+  ([effect opts]
+   (assert (fx/effect? effect) "wrap-fx expects an IEffect instance")
+   (fn
+     ([req]
+      (let [ctx (build-fx-context req opts)
+            res (fx/run-sync! effect ctx)]
+        (resolve-failure-to-response res req opts)))
+     ([req respond raise]
+      (try
+        (let [ctx (build-fx-context req opts)
+              ^CompletableFuture cf (fx/run-async! effect ctx)]
+          (.whenComplete cf
+            (reify BiConsumer
+              (accept [_ val err]
+                (if err
+                  (raise err)
+                  (respond (resolve-failure-to-response val req opts)))))))
+        (catch Throwable t
+          (raise t)))))))

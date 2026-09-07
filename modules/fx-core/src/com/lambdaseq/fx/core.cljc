@@ -188,7 +188,9 @@
   IUnwindable
   (-unwind [_ _ _]
     (try
-      (if (fn? release) (release resource) release)
+      (let [rel-res (if (fn? release) (release resource) release)]
+        (when (effect? rel-res)
+          (run-sync! rel-res context)))
       (catch #?(:clj Throwable :cljs :default) _ nil))
     nil))
 

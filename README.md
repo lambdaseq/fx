@@ -611,6 +611,36 @@ Compose reusable pipeline transformers and effect functions cleanly:
 ;; => "Profile of Alice"
 ```
 
+## Ring HTTP Integration (`com.lambdaseq.fx.ring`)
+
+`fx-ring` integrates `fx` effect pipelines into Ring HTTP web applications, allowing HTTP handlers to be defined as pure effect chains evaluated at the HTTP boundary.
+
+```clojure
+{:deps {com.lambdaseq/fx-ring {:mvn/version "0.2.0"}}}
+```
+
+### Usage Example
+
+```clojure
+(ns my-app.web
+  (:require [com.lambdaseq.fx.core :as fx]
+            [com.lambdaseq.fx.ring :as fx-ring]
+            [com.lambdaseq.fx.ring.response :as fx-resp]))
+
+;; Pure effect handler
+(defn get-user-handler [req]
+  (let [user-id (get-in req [:params :id])]
+    (if (= user-id "42")
+      (fx-resp/ok> {:id 42 :name "Alice"})
+      (fx/fail> :user/not-found {:status 404 :message "User not found"}))))
+
+;; Wrapped Ring application
+(def app
+  (fx-ring/wrap-fx get-user-handler
+    {:failure-map {:user/not-found (fn [err req]
+                                     {:status 404 :body (:message err)})}}))
+```
+
 ## Typed Clojure Integration
 
 `fx-typed` provides complete type signatures for Typed Clojure. Effect channels and variance are fully tracked:
