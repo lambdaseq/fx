@@ -26,7 +26,7 @@ The goal of this task is to author clear, comprehensive, and idiomatic `README.m
 
 ### Functional Requirements
 1. **`modules/fx-jdbc/README.md` Requirements:**
-   - Document dependency coordinate `com.lambdaseq/fx-jdbc {:mvn/version "0.2.0"}`.
+   - Document dependency coordinate `com.lambdaseq/fx-jdbc {:mvn/version "0.0.1-alpha"}`.
    - Document connection lifecycle combinators (`get-datasource>`, `get-connection>`, `close-connection>`, `with-connection>`).
    - Document transaction management (`with-transaction>`) with options (`:isolation`, `:read-only`, `:rollback-only`) and dual failure rollback (exceptions and `IFailure`).
    - Document statement & query execution (`execute!>`, `execute-one!>`, `plan!>`, `prepare-statement>`, `with-prepared-statement>`).
@@ -34,7 +34,7 @@ The goal of this task is to author clear, comprehensive, and idiomatic `README.m
    - Document result-set builders re-exported from `next.jdbc.result-set`.
    - Document structured failure types (`:jdbc/error`, `:jdbc/missing-connectable`) and context key resolution (`::fx-jdbc/datasource`).
 2. **`modules/fx-ring/README.md` Requirements:**
-   - Document dependency coordinate `com.lambdaseq/fx-ring {:mvn/version "0.2.0"}`.
+   - Document dependency coordinate `com.lambdaseq/fx-ring {:mvn/version "0.0.1-alpha"}`.
    - Document adapter middlewares (`wrap-fx`, `wrap-fx-failures`).
    - Document synchronous 1-arity and asynchronous 3-arity (`CompletableFuture`-driven) request evaluation.
    - Document hybrid failure resolution strategy (`:failure-map`, error data `:status` extraction, and `:default-handler` fallback).
@@ -150,7 +150,7 @@ Verify that all documented APIs, functions, options, failure keys, context keys,
 ### ✓ Step 1: Create documentation README for modules/fx-jdbc
 A comprehensive README.md is created for `modules/fx-jdbc` covering all public namespaces, combinators, and lifecycle patterns.
 
-- Create `modules/fx-jdbc/README.md` with module overview, installation instructions (`{:deps {com.lambdaseq/fx-jdbc {:mvn/version "0.2.0"}}}`), and architectural philosophy.
+- Create `modules/fx-jdbc/README.md` with module overview, installation instructions (`{:deps {com.lambdaseq/fx-jdbc {:mvn/version "0.0.1-alpha"}}}`), and architectural philosophy.
 - Document `com.lambdaseq.fx.jdbc` core lifecycle and execution functions: `get-datasource>`, `get-connection>`, `close-connection>`, `with-connection>`, and `with-transaction>` (including `:isolation`, `:read-only`, and `:rollback-only` options).
 - Document query and statement execution: `execute!>`, `execute-one!>`, `plan!>`, `prepare-statement>`, `with-prepared-statement>`, and result-set builders (`as-maps`, `as-unqualified-maps`, `as-kebab-maps`, `as-unqualified-kebab-maps`, `as-lower-maps`, `as-unqualified-lower-maps`, `as-modified-maps`).
 - Document high-level SQL CRUD combinators in `com.lambdaseq.fx.jdbc.sql`: `insert!>`, `insert-multi!>`, `query!>`, `find-by-keys!>`, `get-by-id!>`, `update!>`, and `delete!>`.
@@ -160,7 +160,7 @@ A comprehensive README.md is created for `modules/fx-jdbc` covering all public n
 ### ✓ Step 2: Create documentation README for modules/fx-ring
 A comprehensive README.md is created for `modules/fx-ring` covering Ring HTTP handler adaptation, response combinators, failure mappings, and context injection.
 
-- Create `modules/fx-ring/README.md` with module overview, installation instructions (`{:deps {com.lambdaseq/fx-ring {:mvn/version "0.2.0"}}}`), and design philosophy.
+- Create `modules/fx-ring/README.md` with module overview, installation instructions (`{:deps {com.lambdaseq/fx-ring {:mvn/version "0.0.1-alpha"}}}`), and design philosophy.
 - Document HTTP middleware and runner mechanics in `com.lambdaseq.fx.ring`: `wrap-fx`, `wrap-fx-failures`, `build-fx-context`, and `resolve-failure-to-response`.
 - Detail 1-arity synchronous `(fn [req])` execution via `fx/run-sync!` and 3-arity asynchronous `(fn [req respond raise])` execution via `fx/run-async!`.
 - Document hybrid failure handling: `:failure-map` tag matching, automatic HTTP status code extraction from `error-data`, and `:default-handler` fallback.

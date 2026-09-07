@@ -19,22 +19,6 @@
             </ModuleState>
           </value>
         </entry>
-        <entry key="fx-jdbc">
-          <value>
-            <ModuleState>
-              <option name="buildSystemId" value="CLOJURE_DEPS" />
-              <option name="displayName" value="fx-jdbc" />
-            </ModuleState>
-          </value>
-        </entry>
-        <entry key="fx-ring">
-          <value>
-            <ModuleState>
-              <option name="buildSystemId" value="CLOJURE_DEPS" />
-              <option name="displayName" value="fx-ring" />
-            </ModuleState>
-          </value>
-        </entry>
         <entry key="fx-typed">
           <value>
             <ModuleState>

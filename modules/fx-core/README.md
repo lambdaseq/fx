@@ -9,9 +9,9 @@ Declarative, stack-safe, and purely functional effect system for Clojure and Clo
 Add the dependency to your `deps.edn`:
 
 ```clojure
-{:deps {io.github.conjurernix/fx.core {:mvn/version "0.2.0"}}}
+{:deps {io.github.conjurernix/fx.core {:mvn/version "0.0.1-alpha"}}}
 ;; or local module coordinate
-{:deps {fx/core {:mvn/version "0.2.0"}}}
+{:deps {fx/core {:mvn/version "0.0.1-alpha"}}}
 ```
 
 ---

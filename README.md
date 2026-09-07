@@ -162,16 +162,16 @@ Add the necessary modules to your `deps.edn`:
 ```clojure
 {:deps
  {;; Foundational effect system
-  io.github.conjurernix/fx.core  {:mvn/version "0.2.0"}
+  io.github.conjurernix/fx.core  {:mvn/version "0.0.1-alpha"}
 
   ;; Optional Typed Clojure support
-  io.github.conjurernix/fx.typed {:mvn/version "0.2.0"}
+  io.github.conjurernix/fx.typed {:mvn/version "0.0.1-alpha"}
 
   ;; Optional JDBC database support
-  io.github.conjurernix/fx.jdbc  {:mvn/version "0.2.0"}
+  io.github.conjurernix/fx.jdbc  {:mvn/version "0.0.1-alpha"}
 
   ;; Optional Ring HTTP support
-  io.github.conjurernix/fx.ring  {:mvn/version "0.2.0"}}}
+  io.github.conjurernix/fx.ring  {:mvn/version "0.0.1-alpha"}}}
 ```
 
 ---
