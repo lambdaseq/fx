@@ -8,6 +8,7 @@
     <exclude-output />
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/./modules/fx-core/test" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/./modules/fx-typed/test" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/./modules/fx-jdbc/test" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/./modules/fx-ring/test" isTestSource="true" />
@@ -15,5 +16,63 @@
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="library" name="Deps: babashka/fs:0.4.18" level="project" />
+    <orderEntry type="library" name="Deps: babashka/process:0.6.25" level="project" />
+    <orderEntry type="library" name="Deps: borkdude/edamame:0.0.19" level="project" />
+    <orderEntry type="library" name="Deps: borkdude/sci.impl.reflector:0.0.1" level="project" />
+    <orderEntry type="library" name="Deps: camel-snake-kebab/camel-snake-kebab:0.4.3" level="project" />
+    <orderEntry type="library" name="Deps: clj-stacktrace/clj-stacktrace:0.2.8" level="project" />
+    <orderEntry type="library" name="Deps: com.github.seancorfield/next.jdbc:1.3.1118" level="project" />
+    <orderEntry type="library" name="Deps: com.h2database/h2:2.4.240" level="project" />
+    <orderEntry type="library" name="Deps: com.nextjournal/beholder:1.0.3" level="project" />
+    <orderEntry type="library" name="Deps: commons-codec/commons-codec:1.15" level="project" />
+    <orderEntry type="library" name="Deps: commons-io/commons-io:2.21.0" level="project" />
+    <orderEntry type="library" name="Deps: crypto-equality/crypto-equality:1.0.1" level="project" />
+    <orderEntry type="library" name="Deps: crypto-random/crypto-random:1.2.1" level="project" />
+    <orderEntry type="library" name="Deps: fipp/fipp:0.6.24" level="project" />
+    <orderEntry type="library" name="Deps: hashp/hashp:0.2.2" level="project" />
+    <orderEntry type="library" name="Deps: io.github.cognitect-labs/test-runner:dfb30d" level="project" />
+    <orderEntry type="library" name="Deps: io.github.conjurernix/fx.core:0.0.1-alpha2" level="project" />
+    <orderEntry type="library" name="Deps: io.github.frenchy64/fully-satisfies:1.12.0" level="project" />
+    <orderEntry type="library" name="Deps: io.methvin/directory-watcher:0.17.3" level="project" />
+    <orderEntry type="library" name="Deps: mvxcvi/arrangement:2.0.0" level="project" />
+    <orderEntry type="library" name="Deps: mvxcvi/puget:1.3.2" level="project" />
+    <orderEntry type="library" name="Deps: net.cgrand/macrovich:0.2.1" level="project" />
+    <orderEntry type="library" name="Deps: net.java.dev.jna/jna:5.12.1" level="project" />
+    <orderEntry type="library" name="Deps: org.apache.commons/commons-fileupload2-core:2.0.0-M5" level="project" />
+    <orderEntry type="library" name="Deps: org.babashka/sci:0.3.4" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/clojure:1.12.5" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/core.cache:1.2.263" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/core.memoize:1.2.281" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/core.rrb-vector:0.1.2" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/core.specs.alpha:0.4.74" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/data.priority-map:1.2.1" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/java.classpath:1.1.1" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/java.data:1.4.120" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/math.combinatorics:0.3.2" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/spec.alpha:0.5.238" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/test.check:1.1.3" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/tools.cli:1.0.206" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/tools.namespace:1.5.1" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/tools.reader:1.6.0" level="project" />
+    <orderEntry type="library" name="Deps: org.ow2.asm/asm:9.8" level="project" />
+    <orderEntry type="library" name="Deps: org.ring-clojure/ring-core-protocols:1.15.5" level="project" />
+    <orderEntry type="library" name="Deps: org.ring-clojure/ring-websocket-protocols:1.15.5" level="project" />
+    <orderEntry type="library" name="Deps: org.slf4j/slf4j-api:1.7.36" level="project" />
+    <orderEntry type="library" name="Deps: org.typedclojure/typed.clj.analyzer:1.4.0" level="project" />
+    <orderEntry type="library" name="Deps: org.typedclojure/typed.clj.checker:1.4.0" level="project" />
+    <orderEntry type="library" name="Deps: org.typedclojure/typed.clj.runtime:1.4.0" level="project" />
+    <orderEntry type="library" name="Deps: org.typedclojure/typed.cljc.analyzer:1.4.0" level="project" />
+    <orderEntry type="library" name="Deps: org.typedclojure/typed.lib.clojure:1.4.0" level="project" />
+    <orderEntry type="library" name="Deps: org.typedclojure/typed.lib.spec.alpha:1.4.0" level="project" />
+    <orderEntry type="library" name="Deps: org.xerial/sqlite-jdbc:3.53.2.1" level="project" />
+    <orderEntry type="library" name="Deps: rewrite-clj/rewrite-clj:1.1.45" level="project" />
+    <orderEntry type="library" name="Deps: ring/ring-codec:1.3.0" level="project" />
+    <orderEntry type="library" name="Deps: ring/ring-core:1.15.5" level="project" />
+    <orderEntry type="library" name="Deps: zprint/zprint:1.2.4" level="project" />
+    <orderEntry type="module" module-name="fx-core" />
+    <orderEntry type="module" module-name="fx-jdbc" />
+    <orderEntry type="module" module-name="fx-ring" />
+    <orderEntry type="module" module-name="fx-typed" />
   </component>
 </module>

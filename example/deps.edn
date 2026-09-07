@@ -1,0 +1,12 @@
+{:paths ["src"]
+ :deps {fx/core                           {:local/root "../modules/fx-core"}
+        fx/jdbc                           {:local/root "../modules/fx-jdbc"}
+        fx/ring                           {:local/root "../modules/fx-ring"}
+        com.github.seancorfield/honeysql  {:mvn/version "2.6.1270"}
+        metosin/reitit-ring               {:mvn/version "0.7.2"}
+        metosin/muuntaja                  {:mvn/version "0.6.10"}
+        ring/ring-jetty-adapter           {:mvn/version "1.13.0"}
+        org.xerial/sqlite-jdbc            {:mvn/version "3.53.2.1"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps  {org.clojure/test.check {:mvn/version "1.1.3"}}}}}

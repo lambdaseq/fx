@@ -3,6 +3,14 @@
   <component name="BuildSystemProperties">
     <option name="modules">
       <map>
+        <entry key="example">
+          <value>
+            <ModuleState>
+              <option name="buildSystemId" value="CLOJURE_DEPS" />
+              <option name="displayName" value="example" />
+            </ModuleState>
+          </value>
+        </entry>
         <entry key="fx">
           <value>
             <ModuleState>
@@ -16,6 +24,22 @@
             <ModuleState>
               <option name="buildSystemId" value="CLOJURE_DEPS" />
               <option name="displayName" value="fx-core" />
+            </ModuleState>
+          </value>
+        </entry>
+        <entry key="fx-jdbc">
+          <value>
+            <ModuleState>
+              <option name="buildSystemId" value="CLOJURE_DEPS" />
+              <option name="displayName" value="fx-jdbc" />
+            </ModuleState>
+          </value>
+        </entry>
+        <entry key="fx-ring">
+          <value>
+            <ModuleState>
+              <option name="buildSystemId" value="CLOJURE_DEPS" />
+              <option name="displayName" value="fx-ring" />
             </ModuleState>
           </value>
         </entry>

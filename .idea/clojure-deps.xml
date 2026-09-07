@@ -20,6 +20,10 @@
     <option name="dirTypeMappings">
       <set>
         <FolderState>
+          <option name="dirUrl" value="file://$PROJECT_DIR$/example/test" />
+          <option name="type" value="TEST_SOURCE" />
+        </FolderState>
+        <FolderState>
           <option name="dirUrl" value="file://$PROJECT_DIR$/modules/fx-core/test" />
           <option name="type" value="TEST_SOURCE" />
         </FolderState>
@@ -44,7 +48,10 @@
     <option name="projectFiles">
       <set>
         <option value="file://$PROJECT_DIR$/deps.edn" />
+        <option value="file://$PROJECT_DIR$/example/deps.edn" />
         <option value="file://$PROJECT_DIR$/modules/fx-core/deps.edn" />
+        <option value="file://$PROJECT_DIR$/modules/fx-jdbc/deps.edn" />
+        <option value="file://$PROJECT_DIR$/modules/fx-ring/deps.edn" />
         <option value="file://$PROJECT_DIR$/modules/fx-typed/deps.edn" />
       </set>
     </option>
