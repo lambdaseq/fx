@@ -1,4 +1,4 @@
-# com.lambdaseq/fx-ring
+# fx/ring
 
 Ring HTTP middleware and response combinators for the `fx` effect system.
 
@@ -9,16 +9,18 @@ Ring HTTP middleware and response combinators for the `fx` effect system.
 Add the dependency to your `deps.edn`:
 
 ```clojure
-{:deps {com.lambdaseq/fx-ring {:mvn/version "0.2.0"}}}
+{:deps {io.github.conjurernix/fx.ring {:mvn/version "0.2.0"}}}
+;; or local module coordinate
+{:deps {fx/ring {:mvn/version "0.2.0"}}}
 ```
 
-Requires `com.lambdaseq/fx-core`.
+Requires `fx/core` (`io.github.conjurernix/fx.core`).
 
 ## Philosophy & Mental Model
 
 - **Handlers as Pure Effect Descriptions**: Endpoints are modeled as immutable effect pipelines that declare their input dependencies and failure conditions without performing direct I/O during pipeline definition.
 - **Unified Boundary Evaluation**: Middleware (`wrap-fx`) executes the effect pipeline at the edge using `fx/run-sync!` for 1-arity synchronous calls or `fx/run-async!` (backed by `CompletableFuture`) for 3-arity asynchronous calls.
-- **Deterministic Context Injection**: The incoming Ring request is automatically bound to `::fx-ring/request` (`:com.lambdaseq.fx.ring/request`) alongside optional static or per-request services.
+- **Deterministic Context Injection**: The incoming Ring request is automatically bound to `::fx-ring/request` (`:fx.ring/request`) alongside optional static or per-request services.
 - **Hybrid Failure Resolution**: Failures flow through the typed `IFailure` channel and are automatically translated to HTTP response maps using tag matching, status code reflection, or custom default fallbacks.
 
 ---
@@ -27,9 +29,9 @@ Requires `com.lambdaseq/fx-core`.
 
 ```clojure
 (ns example.web
-  (:require [com.lambdaseq.fx.core :as fx]
-            [com.lambdaseq.fx.ring :as fx-ring]
-            [com.lambdaseq.fx.ring.response :as fx-resp]))
+  (:require [fx.core :as fx]
+            [fx.ring :as fx-ring]
+            [fx.ring.response :as fx-resp]))
 
 ;; Define endpoint effect pipeline
 (def greet-endpoint
@@ -56,7 +58,7 @@ Requires `com.lambdaseq/fx-core`.
 
 ## API Reference
 
-### Ring Adapter & Middleware (`com.lambdaseq.fx.ring`)
+### Ring Adapter & Middleware (`fx.ring`)
 
 | Function | Signature | Description |
 |---|---|---|
@@ -74,7 +76,7 @@ Requires `com.lambdaseq/fx-core`.
 
 ---
 
-### Request Combinators (`com.lambdaseq.fx.ring.response`)
+### Request Combinators (`fx.ring.response`)
 
 | Function | Signature | Description |
 |---|---|---|
@@ -93,7 +95,7 @@ Requires `com.lambdaseq/fx-core`.
 
 ---
 
-### Response Constructors & Modifiers (`com.lambdaseq.fx.ring.response`)
+### Response Constructors & Modifiers (`fx.ring.response`)
 
 Constructors and modifiers integrate with standard threading (`->`):
 
@@ -257,11 +259,11 @@ Here is a complete, real-world example demonstrating `fx-ring` integrated with `
 
 ```clojure
 (ns example.api
-  (:require [com.lambdaseq.fx.core :as fx]
-            [com.lambdaseq.fx.jdbc :as fx-jdbc]
-            [com.lambdaseq.fx.jdbc.sql :as sql]
-            [com.lambdaseq.fx.ring :as fx-ring]
-            [com.lambdaseq.fx.ring.response :as fx-resp]))
+  (:require [fx.core :as fx]
+            [fx.jdbc :as fx-jdbc]
+            [fx.jdbc.sql :as sql]
+            [fx.ring :as fx-ring]
+            [fx.ring.response :as fx-resp]))
 
 ;; 1. Define Business / Query Effect Pipeline
 (defn get-user-by-id-endpoint []

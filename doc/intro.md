@@ -1,4 +1,4 @@
-# Architecture and Design of com.lambdaseq/fx
+# Architecture and Design of fx
 
 A comprehensive guide to the internal architecture, protocol mechanics, stack-safe interpreter, and AST manipulation capabilities of `fx`.
 
@@ -19,7 +19,7 @@ Traditional functional effect libraries often compile pipelines into nested, opa
 
 ## 2. Core Protocols and AST Records
 
-The runtime is structured around five core protocols in `com.lambdaseq.fx.core`:
+The runtime is structured around five core protocols in `fx.core`:
 
 ### Protocols
 
@@ -73,7 +73,7 @@ Because effects are standard Clojure records, their fields can be directly inspe
 
 (:tag r)    ;; => :retry
 (:policy r) ;; => {:max-attempts 3, :delay-ms 100}
-(:target r) ;; => #com.lambdaseq.fx.core.MapEffect{...}
+(:target r) ;; => #fx.core.MapEffect{...}
 ```
 
 ---
@@ -142,14 +142,14 @@ Context is threaded as an explicit parameter through every step and continuation
 
 ---
 
-## 5. Pipeline Metaprogramming with `com.lambdaseq.fx.utils`
+## 5. Pipeline Metaprogramming with `fx.utils`
 
-Because effects are transparent data trees, `com.lambdaseq.fx.utils` provides pure functions to inspect, modify, and compose pipelines without executing them:
+Because effects are transparent data trees, `fx.utils` provides pure functions to inspect, modify, and compose pipelines without executing them:
 
 ### Linear Inspection & Traversal
 
 ```clojure
-(require '[com.lambdaseq.fx.utils :as fxu])
+(require '[fx.utils :as fxu])
 
 (def pipeline
   (-> (fx/service> :db)
@@ -158,7 +158,7 @@ Because effects are transparent data trees, `com.lambdaseq.fx.utils` provides pu
 
 (fxu/chain-length pipeline)     ;; => 3
 (fxu/effect-tags pipeline)       ;; => [:context :map :map]
-(fxu/root-effect pipeline)       ;; => #com.lambdaseq.fx.core.ContextEffect{...}
+(fxu/root-effect pipeline)       ;; => #fx.core.ContextEffect{...}
 ```
 
 ### Splicing & Pipeline Rewriting
@@ -192,8 +192,8 @@ The `modules/fx-typed` module provides Typed Clojure annotations for all effect 
 
 ```clojure
 (ns my-app.typed-example
-  (:require [com.lambdaseq.fx.core :as fx]
-            [com.lambdaseq.fx.typed]
+  (:require [fx.core :as fx]
+            [fx.typed]
             [typed.clojure :as t]))
 
 (t/ann fetch-data (fx/IEffect t/Any String (t/Option (fx/IFailure (t/Val :not-found) t/Any)) '{:db t/Any}))

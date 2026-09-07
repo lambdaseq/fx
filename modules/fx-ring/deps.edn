@@ -1,6 +1,6 @@
 {:paths ["src"]
- :deps  {com.lambdaseq/fx-core {:local/root "../fx-core"}
-         ring/ring-core        {:mvn/version "1.15.5"}}
+ :deps  {fx/core        {:local/root "../fx-core"}
+         ring/ring-core {:mvn/version "1.15.5"}}
  :aliases
  {:dev
   {:extra-deps {hashp/hashp {:mvn/version "0.2.2"}}}

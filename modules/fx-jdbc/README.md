@@ -1,4 +1,4 @@
-# com.lambdaseq/fx-jdbc
+# fx/jdbc
 
 Effectful, purely functional JDBC database access for the `fx` effect system, built on [`next.jdbc`](https://github.com/seancorfield/next-jdbc).
 
@@ -9,17 +9,19 @@ Effectful, purely functional JDBC database access for the `fx` effect system, bu
 Add the dependency to your `deps.edn`:
 
 ```clojure
-{:deps {com.lambdaseq/fx-jdbc {:mvn/version "0.2.0"}}}
+{:deps {io.github.conjurernix/fx.jdbc {:mvn/version "0.2.0"}}}
+;; or local module coordinate
+{:deps {fx/jdbc {:mvn/version "0.2.0"}}}
 ```
 
-Requires `com.lambdaseq/fx-core`.
+Requires `fx/core` (`io.github.conjurernix/fx.core`).
 
 ## Philosophy & Key Concepts
 
 - **Effects as Blueprints**: Database calls are descriptions of queries and transactions represented as immutable data records, executed only at pipeline boundaries via `fx/run-sync!` or `fx/run-async!`.
 - **Automatic Resource Lifecycles**: Connection pools and statements are acquired and closed deterministically via bracket combinators (`acquire-release>`), avoiding connection leaks even under unhandled failures.
 - **Dual-Failure Transaction Rollbacks**: Transactions wrapped in `with-transaction>` automatically roll back if an exception is thrown **or** if any step in the pipeline returns an `IFailure`.
-- **Context-Driven Connection Resolution**: Operations resolve their target connection from an explicit argument, an upstream piped value, or dynamically from `::fx-jdbc/datasource` (`:com.lambdaseq.fx.jdbc/datasource`) in the execution context.
+- **Context-Driven Connection Resolution**: Operations resolve their target connection from an explicit argument, an upstream piped value, or dynamically from `::fx-jdbc/datasource` (`:fx.jdbc/datasource`) in the execution context.
 - **Structured Failure Payloads**: SQL exceptions are captured as typed `:jdbc/error` failure records containing `:sqlstate`, `:error-code`, `:statement`, and `:cause`.
 
 ---
@@ -28,9 +30,9 @@ Requires `com.lambdaseq/fx-core`.
 
 ```clojure
 (ns example.db
-  (:require [com.lambdaseq.fx.core :as fx]
-            [com.lambdaseq.fx.jdbc :as fx-jdbc]
-            [com.lambdaseq.fx.jdbc.sql :as sql]))
+  (:require [fx.core :as fx]
+            [fx.jdbc :as fx-jdbc]
+            [fx.jdbc.sql :as sql]))
 
 (def db-spec
   {:dbtype "h2:mem"
@@ -57,7 +59,7 @@ Requires `com.lambdaseq/fx-core`.
 
 ## API Reference
 
-### Connection & Datasource Lifecycle (`com.lambdaseq.fx.jdbc`)
+### Connection & Datasource Lifecycle (`fx.jdbc`)
 
 | Function | Signature | Description |
 |---|---|---|
@@ -66,7 +68,7 @@ Requires `com.lambdaseq/fx-core`.
 | `close-connection>` | `[conn]` | Creates an effect safely closing an `AutoCloseable` connection or statement. |
 | `with-connection>` | `([use-eff-fn] [connectable use-eff-fn] [connectable opts use-eff-fn])` | Scopes connection acquisition, binds `::fx-jdbc/datasource` into context, executes `use-eff-fn`, and guarantees close. |
 
-### Transactions (`com.lambdaseq.fx.jdbc`)
+### Transactions (`fx.jdbc`)
 
 | Function | Signature | Description |
 |---|---|---|
@@ -80,7 +82,7 @@ Requires `com.lambdaseq/fx-core`.
 
 Nested calls to `with-transaction>` automatically leverage JDBC savepoints on the existing connection.
 
-### Statement & Query Execution (`com.lambdaseq.fx.jdbc`)
+### Statement & Query Execution (`fx.jdbc`)
 
 | Function | Signature | Description |
 |---|---|---|
@@ -90,7 +92,7 @@ Nested calls to `with-transaction>` automatically leverage JDBC savepoints on th
 | `prepare-statement>` | `([sql-params] [conn sql-params] [sql-params opts] [conn sql-params opts])` | Creates an effect yielding a `java.sql.PreparedStatement`. |
 | `with-prepared-statement>` | `([sql-params use-eff-fn] [conn sql-params use-eff-fn] [sql-params opts use-eff-fn] [conn sql-params opts use-eff-fn])` | Prepares a statement, passes it to `use-eff-fn`, and guarantees statement closure upon completion. |
 
-### Result-Set Builders (`com.lambdaseq.fx.jdbc`)
+### Result-Set Builders (`fx.jdbc`)
 
 Re-exported from `next.jdbc.result-set` for passing into `:builder-fn` options:
 
@@ -104,7 +106,7 @@ Re-exported from `next.jdbc.result-set` for passing into `:builder-fn` options:
 
 ---
 
-### SQL CRUD Combinators (`com.lambdaseq.fx.jdbc.sql`)
+### SQL CRUD Combinators (`fx.jdbc.sql`)
 
 High-level helpers wrapping `next.jdbc.sql` that accept an optional leading connectable or resolve `::fx-jdbc/datasource` from the ambient effect context:
 
@@ -152,7 +154,7 @@ Generated when a JDBC combinator is called without an explicit connection argume
 
 ### 1. Connection Scoping & Context Resolution
 
-When executing queries inside `with-connection>`, the acquired connection is automatically injected into the effect context under `::fx-jdbc/datasource` (`:com.lambdaseq.fx.jdbc/datasource`). All nested SQL operations resolve this connection automatically:
+When executing queries inside `with-connection>`, the acquired connection is automatically injected into the effect context under `::fx-jdbc/datasource` (`:fx.jdbc/datasource`). All nested SQL operations resolve this connection automatically:
 
 ```clojure
 (defn find-active-users []
