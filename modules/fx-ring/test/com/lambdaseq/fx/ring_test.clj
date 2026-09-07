@@ -81,7 +81,7 @@
       (is (= {:status 200 :body "URI was /test"} res))))
 
   (testing "throws assertion error when non-effect passed to wrap-fx"
-    (is (thrown? java.lang.AssertionError (fx-ring/wrap-fx (fn [_] {:status 200}))))))
+    (is (thrown? AssertionError (fx-ring/wrap-fx (fn [_] {:status 200}))))))
 
 (deftest test-wrap-fx-async
   (testing "evaluates effect pipeline in 3-arity async context"
