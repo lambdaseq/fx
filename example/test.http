@@ -1,0 +1,138 @@
+### ===========================================================================
+### Todo API Interactive HTTP Tests
+### ===========================================================================
+
+@host = http://localhost:3000
+
+### 1. List All Todos (Empty or Initial List)
+GET {{host}}/api/todos
+Accept: application/json
+
+###
+
+### 2. Create Todo 1 - Buy Groceries
+POST {{host}}/api/todos
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Buy groceries",
+  "description": "Milk, eggs, and bread"
+}
+
+###
+
+### 3. Create Todo 2 - Finish FX Ring Documentation
+POST {{host}}/api/todos
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Document fx.ring response combinators",
+  "description": "Add ok>, created>, and bad-request> examples"
+}
+
+###
+
+### 4. Create Todo 3 - Already Completed Item
+POST {{host}}/api/todos
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Set up Clojure deps",
+  "description": "Initialize project structure",
+  "completed": true
+}
+
+###
+
+### 5. List All Todos
+GET {{host}}/api/todos
+Accept: application/json
+
+###
+
+### 6. Filter Todos: Completed Only
+GET {{host}}/api/todos?completed=true
+Accept: application/json
+
+###
+
+### 7. Filter Todos: Pending Only
+GET {{host}}/api/todos?completed=false
+Accept: application/json
+
+###
+
+### 8. Get Todo by ID
+GET {{host}}/api/todos/1
+Accept: application/json
+
+###
+
+### 9. Update Todo by ID
+PUT {{host}}/api/todos/1
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Buy groceries and coffee",
+  "description": "Milk, eggs, sourdough bread, and dark roast coffee",
+  "completed": false
+}
+
+###
+
+### 10. Toggle Todo Completion Status
+PATCH {{host}}/api/todos/1/toggle
+Accept: application/json
+
+###
+
+### 11. Delete Todo by ID
+DELETE {{host}}/api/todos/1
+Accept: application/json
+
+###
+
+### 12. Verify Deletion
+GET {{host}}/api/todos/1
+Accept: application/json
+
+###
+
+### ===========================================================================
+### Error Handling & Validation Tests
+### ===========================================================================
+
+### Error: Validation Error - Missing/Empty Title (400 Bad Request)
+POST {{host}}/api/todos
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "",
+  "description": "This should fail validation"
+}
+
+###
+
+### Error: Not Found - Non-Existent ID (404 Not Found)
+GET {{host}}/api/todos/999999
+Accept: application/json
+
+###
+
+### Error: Invalid ID Format (400 Bad Request)
+GET {{host}}/api/todos/abc
+Accept: application/json
+
+###
+
+### Error: Method Not Allowed (405)
+POST {{host}}/api/todos/1/toggle
+Content-Type: application/json
+Accept: application/json
+
+{}

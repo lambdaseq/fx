@@ -18,8 +18,8 @@ Requires `fx/core` (`io.github.conjurernix/fx.core`).
 
 ## Philosophy & Mental Model
 
-- **Handlers as Pure Effect Descriptions**: Endpoints are modeled as immutable effect pipelines that declare their input dependencies and failure conditions without performing direct I/O during pipeline definition.
-- **Unified Boundary Evaluation**: Middleware (`wrap-fx`) executes the effect pipeline at the edge using `fx/run-sync!` for 1-arity synchronous calls or `fx/run-async!` (backed by `CompletableFuture`) for 3-arity asynchronous calls.
+- **Handlers as Pure Effect Descriptions**: Endpoints are modeled as handler functions `(fn [req] -> effect)` that return immutable effect pipelines declaring their input dependencies and failure conditions without performing direct I/O during pipeline definition.
+- **Unified Boundary Evaluation**: Middleware (`wrap-fx`) executes the effect pipeline returned by the handler at the edge using `fx/run-sync!` for 1-arity synchronous calls or `fx/run-async!` (backed by `CompletableFuture`) for 3-arity asynchronous calls.
 - **Deterministic Context Injection**: The incoming Ring request is automatically bound to `::fx-ring/request` (`:fx.ring/request`) alongside optional static or per-request services.
 - **Hybrid Failure Resolution**: Failures flow through the typed `IFailure` channel and are automatically translated to HTTP response maps using tag matching, status code reflection, or custom default fallbacks.
 
@@ -33,18 +33,16 @@ Requires `fx/core` (`io.github.conjurernix/fx.core`).
             [fx.ring :as fx-ring]
             [fx.ring.response :as fx-resp]))
 
-;; Define endpoint effect pipeline
-(def greet-endpoint
-  (-> (fx-resp/request> :params)
-      (fx/map> (fn [params] (get params :name "World")))
-      (fx/mapcat> (fn [name]
-                    (if (= name "forbidden")
-                      (fx/fail> :auth/forbidden {:status 403 :message "Access denied"})
-                      (fx-resp/ok> (str "Hello, " name "!")))))))
+;; Define endpoint effect handler (req -> effect)
+(defn greet-handler [req]
+  (let [name (get-in req [:params :name] "World")]
+    (if (= name "forbidden")
+      (fx/fail> :auth/forbidden {:status 403 :message "Access denied"})
+      (fx-resp/ok> (str "Hello, " name "!")))))
 
 ;; Wrap into a standard Ring handler
 (def app
-  (fx-ring/wrap-fx greet-endpoint))
+  (fx-ring/wrap-fx greet-handler))
 
 ;; 1-Arity Synchronous Execution
 (app {:request-method :get :uri "/greet" :params {:name "Alice"}})
@@ -62,7 +60,7 @@ Requires `fx/core` (`io.github.conjurernix/fx.core`).
 
 | Function | Signature | Description |
 |---|---|---|
-| `wrap-fx` | `([effect] [effect opts])` | Adapts an `IEffect` pipeline into a Ring handler supporting 1-arity sync `(fn [req])` and 3-arity async `(fn [req respond raise])`. |
+| `wrap-fx` | `([handler] [handler opts])` | Adapts an effect handler `(fn [req])` returning an `IEffect` pipeline into a Ring handler supporting 1-arity sync `(fn [req])` and 3-arity async `(fn [req respond raise])`. |
 | `wrap-fx-failures` | `([handler] [handler opts])` | Middleware for standard Ring handlers that catches returned `IFailure` instances and transforms them into HTTP responses. |
 | `build-fx-context` | `[req opts]` | Merges `{::fx-ring/request req}` with resolved `:provider`, `:services`, or `:context` into an effect context map. |
 | `resolve-failure-to-response` | `([failure req] [failure req opts])` | Translates an `IFailure` into a Ring response map using the hybrid resolution strategy. |
@@ -101,13 +99,13 @@ Constructors and modifiers integrate with standard threading (`->`):
 
 | Function | Signature | Description |
 |---|---|---|
-| `response>` | `([body] [eff body])` | Creates an effect yielding a `200 OK` response with `body`. |
-| `ok>` | `([] [body] [eff body])` | Creates an effect yielding a `200 OK` response with optional `body`. |
-| `created>` | `([url] [url body] [eff url body])` | Creates an effect yielding a `201 Created` response with `Location` header `url`. |
-| `bad-request>` | `([] [body] [eff body])` | Creates an effect yielding a `400 Bad Request` response with optional `body`. |
-| `not-found>` | `([] [body] [eff body])` | Creates an effect yielding a `404 Not Found` response with optional `body`. |
-| `internal-server-error>` | `([] [body] [eff body])` | Creates an effect yielding a `500 Internal Server Error` response with optional `body`. |
-| `redirect>` | `([url] [url status] [eff url status])` | Creates an effect yielding a `302 Found` (or custom status) redirect response. |
+| `response>` | `([] [eff-or-body] [eff body])` | Transforms upstream effect value into a `200 OK` response map, or creates a 200 response effect from static `body`. |
+| `ok>` | `([] [eff-or-body] [eff body])` | Transforms upstream effect value into a `200 OK` response map, or creates a 200 response effect from static `body`. |
+| `created>` | `([] [eff-or-url] [eff-or-url url-or-body] [eff url body])` | Transforms upstream effect value into a `201 Created` response map, or creates a 201 response effect with optional `Location` header. |
+| `bad-request>` | `([] [eff-or-body] [eff body])` | Transforms upstream effect value into a `400 Bad Request` response map, or creates a 400 response effect. |
+| `not-found>` | `([] [eff-or-body] [eff body])` | Transforms upstream effect value into a `404 Not Found` response map, or creates a 404 response effect. |
+| `internal-server-error>` | `([] [eff-or-body] [eff body])` | Transforms upstream effect value into a `500 Internal Server Error` response map, or creates a 500 response effect. |
+| `redirect>` | `([url] [eff-or-url url-or-status] [eff url status])` | Creates an effect yielding a `302 Found` (or custom status) redirect response. |
 | `status>` | `([status-code] [eff status-code])` | Sets the HTTP status code on the upstream response map. |
 | `header>` | `([header-name header-val] [eff header-name header-val])` | Sets an HTTP header on the upstream response map. |
 | `content-type>` | `([content-type-str] [eff content-type-str])` | Sets the `Content-Type` header on the upstream response map. |
@@ -140,7 +138,7 @@ Define custom translation functions per failure tag:
 ```clojure
 (def app
   (fx-ring/wrap-fx
-    endpoint
+    user-handler
     {:failure-map
      {:user/not-found
       (fn [data req]
@@ -179,7 +177,7 @@ Unmatched failures default to `:default-handler` or a generic `500 Internal Serv
 ```clojure
 (def app
   (fx-ring/wrap-fx
-    endpoint
+    endpoint-handler
     {:default-handler
      (fn [failure req]
        {:status 500
@@ -200,7 +198,7 @@ Unmatched failures default to `:default-handler` or a generic `500 Internal Serv
 ```clojure
 (def app
   (fx-ring/wrap-fx
-    endpoint
+    endpoint-handler
     {:provider {:app-config {:env "production" :version "1.0.0"}
                 :audit-log  audit-service}}))
 ```
@@ -212,7 +210,7 @@ Provide dynamic per-request context (e.g., authentication tokens or request IDs)
 ```clojure
 (def app
   (fx-ring/wrap-fx
-    endpoint
+    endpoint-handler
     {:provider (fn [req]
                  {:correlation-id (get-in req [:headers "x-correlation-id"] (str (java.util.UUID/randomUUID)))
                   :session-user   (get-in req [:session :user])})}))
@@ -221,7 +219,7 @@ Provide dynamic per-request context (e.g., authentication tokens or request IDs)
 Inside your effect pipeline, access these services with `fx/service>`:
 
 ```clojure
-(def endpoint
+(defn endpoint-handler [_req]
   (-> (fx/service> :correlation-id)
       (fx/mapcat> (fn [cid]
                     (-> (fx-resp/ok> {:status "healthy"})
@@ -265,24 +263,22 @@ Here is a complete, real-world example demonstrating `fx-ring` integrated with `
             [fx.ring :as fx-ring]
             [fx.ring.response :as fx-resp]))
 
-;; 1. Define Business / Query Effect Pipeline
-(defn get-user-by-id-endpoint []
-  (-> (fx-resp/request> :params)
-      (fx/map> (fn [params] (Integer/parseInt (get params :id "0"))))
-      (fx/mapcat> (fn [user-id]
-                    ;; Resolve datasource injected by wrap-fx provider
-                    (-> (fx/service> ::fx-jdbc/datasource)
-                        (fx/mapcat> (fn [ds]
-                                      (fx-jdbc/with-connection> ds
-                                        (fn [_conn]
-                                          (-> (sql/get-by-id!> :users user-id {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
-                                              (fx/mapcat> (fn [user]
-                                                            (if user
-                                                              (-> (fx-resp/ok> user)
-                                                                  (fx-resp/content-type> "application/json"))
-                                                              (fx/fail> :user/not-found
-                                                                        {:status 404
-                                                                         :message (str "User " user-id " not found")}))))))))))))))
+;; 1. Define Business / Query Effect Handler (req -> effect)
+(defn get-user-by-id-handler [req]
+  (let [user-id (Integer/parseInt (get-in req [:params :id] "0"))]
+    ;; Resolve datasource injected by wrap-fx provider
+    (-> (fx/service> ::fx-jdbc/datasource)
+        (fx/mapcat> (fn [ds]
+                      (fx-jdbc/with-connection> ds
+                        (fn [_conn]
+                          (-> (sql/get-by-id!> :users user-id {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+                              (fx/mapcat> (fn [user]
+                                            (if user
+                                              (-> (fx-resp/ok> user)
+                                                  (fx-resp/content-type> "application/json"))
+                                              (fx/fail> :user/not-found
+                                                        {:status 404
+                                                         :message (str "User " user-id " not found")}))))))))))))
 
 ;; 2. Set Up Datasource & Ring App
 (def db-spec {:dbtype "h2:mem" :dbname "api_db;DB_CLOSE_DELAY=-1"})
@@ -298,7 +294,7 @@ Here is a complete, real-world example demonstrating `fx-ring` integrated with `
 
     ;; Wrap handler with datasource injected into context
     (fx-ring/wrap-fx
-      (get-user-by-id-endpoint)
+      get-user-by-id-handler
       {:provider {::fx-jdbc/datasource ds}
        :failure-map
        {:user/not-found

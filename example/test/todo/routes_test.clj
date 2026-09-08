@@ -49,27 +49,20 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-route-handlers-ast-inspection
-  (testing "route handlers are pure effect pipelines before evaluation"
-    (let [list-h (routes/list-todos-handler>)
-          create-h (routes/create-todo-handler>)
-          get-h (routes/get-todo-handler>)
-          update-h (routes/update-todo-handler>)
-          toggle-h (routes/toggle-todo-handler>)
-          delete-h (routes/delete-todo-handler>)]
+  (testing "route handlers return pure effect pipelines for a given request"
+    (let [list-h (routes/list-todos-handler> {})
+          create-h (routes/create-todo-handler> {:body-params {:title "Task"}})
+          get-h (routes/get-todo-handler> {:path-params {:id "1"}})
+          update-h (routes/update-todo-handler> {:path-params {:id "1"}})
+          toggle-h (routes/toggle-todo-handler> {:path-params {:id "1"}})
+          delete-h (routes/delete-todo-handler> {:path-params {:id "1"}})]
 
       (is (fx/effect? list-h))
       (is (fx/effect? create-h))
       (is (fx/effect? get-h))
       (is (fx/effect? update-h))
       (is (fx/effect? toggle-h))
-      (is (fx/effect? delete-h))
-
-      (is (= [:context :mapcat :map] (fxu/effect-tags list-h)))
-      (is (= [:context :mapcat :map] (fxu/effect-tags create-h)))
-      (is (= [:context :mapcat :map] (fxu/effect-tags get-h)))
-      (is (= [:context :mapcat :map] (fxu/effect-tags update-h)))
-      (is (= [:context :mapcat :map] (fxu/effect-tags toggle-h)))
-      (is (= [:context :mapcat :map] (fxu/effect-tags delete-h))))))
+      (is (fx/effect? delete-h)))))
 
 ;; ---------------------------------------------------------------------------
 ;; 3. Direct Execution of Route Effect Handlers with Mock Request Context
@@ -83,8 +76,8 @@
       (let [req {:body-params {:title       "Handler Test Task"
                                :description "Testing effect handler directly"}}
             resp (fx/run-sync!
-                   (routes/create-todo-handler>)
-                   (assoc base-ctx fx-resp/request-key req))]
+                   (routes/create-todo-handler> req)
+                   base-ctx)]
         (is (= 201 (:status resp)))
         (is (= "Handler Test Task" (get-in resp [:body :title])))
         (is (= 1 (get-in resp [:body :id])))))
@@ -92,13 +85,13 @@
     (testing "get-todo-handler> returns 200 for valid ID, or :todo/invalid-input for non-numeric ID"
       (let [req-valid {:path-params {:id "1"}}
             resp-valid (fx/run-sync!
-                         (routes/get-todo-handler>)
-                         (assoc base-ctx fx-resp/request-key req-valid))
+                         (routes/get-todo-handler> req-valid)
+                         base-ctx)
 
             req-invalid {:path-params {:id "not-a-number"}}
             resp-invalid (fx/run-sync!
-                           (routes/get-todo-handler>)
-                           (assoc base-ctx fx-resp/request-key req-invalid))]
+                           (routes/get-todo-handler> req-invalid)
+                           base-ctx)]
 
         (is (= 200 (:status resp-valid)))
         (is (= 1 (get-in resp-valid [:body :id])))
@@ -113,18 +106,18 @@
 
       (let [req-all {}
             resp-all (fx/run-sync!
-                       (routes/list-todos-handler>)
-                       (assoc base-ctx fx-resp/request-key req-all))
+                       (routes/list-todos-handler> req-all)
+                       base-ctx)
 
             req-comp {:params {"completed" "true"}}
             resp-comp (fx/run-sync!
-                        (routes/list-todos-handler>)
-                        (assoc base-ctx fx-resp/request-key req-comp))
+                        (routes/list-todos-handler> req-comp)
+                        base-ctx)
 
             req-act {:params {"completed" "false"}}
             resp-act (fx/run-sync!
-                       (routes/list-todos-handler>)
-                       (assoc base-ctx fx-resp/request-key req-act))]
+                       (routes/list-todos-handler> req-act)
+                       base-ctx)]
 
         (is (= 200 (:status resp-all)))
         (is (= 2 (count (:body resp-all))))
@@ -141,14 +134,14 @@
       (let [req-valid {:path-params {:id "1"}
                        :body-params {:title "Updated via Handler"}}
             resp-valid (fx/run-sync!
-                         (routes/update-todo-handler>)
-                         (assoc base-ctx fx-resp/request-key req-valid))
+                         (routes/update-todo-handler> req-valid)
+                         base-ctx)
 
             req-bad-id {:path-params {:id "abc"}
                         :body-params {:title "Whatever"}}
             resp-bad-id (fx/run-sync!
-                          (routes/update-todo-handler>)
-                          (assoc base-ctx fx-resp/request-key req-bad-id))]
+                          (routes/update-todo-handler> req-bad-id)
+                          base-ctx)]
 
         (is (= 200 (:status resp-valid)))
         (is (= "Updated via Handler" (get-in resp-valid [:body :title])))
@@ -159,13 +152,13 @@
     (testing "toggle-todo-handler> toggles completion or rejects bad id"
       (let [req-valid {:path-params {:id "1"}}
             resp-valid (fx/run-sync!
-                         (routes/toggle-todo-handler>)
-                         (assoc base-ctx fx-resp/request-key req-valid))
+                         (routes/toggle-todo-handler> req-valid)
+                         base-ctx)
 
             req-bad-id {:path-params {:id "abc"}}
             resp-bad-id (fx/run-sync!
-                          (routes/toggle-todo-handler>)
-                          (assoc base-ctx fx-resp/request-key req-bad-id))]
+                          (routes/toggle-todo-handler> req-bad-id)
+                          base-ctx)]
 
         (is (= 200 (:status resp-valid)))
         (is (true? (get-in resp-valid [:body :completed])))
@@ -176,13 +169,13 @@
     (testing "delete-todo-handler> deletes entity or rejects bad id"
       (let [req-valid {:path-params {:id "1"}}
             resp-valid (fx/run-sync!
-                         (routes/delete-todo-handler>)
-                         (assoc base-ctx fx-resp/request-key req-valid))
+                         (routes/delete-todo-handler> req-valid)
+                         base-ctx)
 
             req-bad-id {:path-params {:id "abc"}}
             resp-bad-id (fx/run-sync!
-                          (routes/delete-todo-handler>)
-                          (assoc base-ctx fx-resp/request-key req-bad-id))]
+                          (routes/delete-todo-handler> req-bad-id)
+                          base-ctx)]
 
         (is (= 200 (:status resp-valid)))
         (is (= {:deleted true :id 1} (:body resp-valid)))

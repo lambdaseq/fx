@@ -16,54 +16,78 @@
        (fx/map> (fn [req] (get req key default-val))))))
 
 (defn response>
-  "Creates an effect yielding a standard 200 Ring response map wrapping `body`."
-  ([body]
-   (fx/succeed> (ring-resp/response body)))
+  "Transforms the value of `eff` into a standard 200 Ring response map,
+   or creates a 200 response effect from a static `body`."
+  ([]
+   (fx/map> (fn [body] (ring-resp/response body))))
+  ([eff-or-body]
+   (if (fx/effect? eff-or-body)
+     (fx/map> eff-or-body (fn [body] (ring-resp/response body)))
+     (fx/succeed> (ring-resp/response eff-or-body))))
   ([eff body]
    (-> eff (fx/map> (fn [_] (ring-resp/response body))))))
 
 (defn ok>
-  "Creates an effect yielding a 200 OK Ring response map wrapping `body`."
+  "Transforms the value of `eff` into a 200 OK Ring response map,
+   or creates a 200 OK response effect from a static `body`."
   ([]
-   (fx/succeed> (ring-resp/response nil)))
-  ([body]
-   (fx/succeed> (ring-resp/response body)))
+   (fx/map> (fn [body] (ring-resp/response body))))
+  ([eff-or-body]
+   (if (fx/effect? eff-or-body)
+     (fx/map> eff-or-body (fn [body] (ring-resp/response body)))
+     (fx/succeed> (ring-resp/response eff-or-body))))
   ([eff body]
    (-> eff (fx/map> (fn [_] (ring-resp/response body))))))
 
 (defn created>
-  "Creates an effect yielding a 201 Created Ring response map."
-  ([url]
-   (fx/succeed> (ring-resp/created url)))
-  ([url body]
-   (fx/succeed> (ring-resp/created url body)))
+  "Transforms the value of `eff` into a 201 Created Ring response map,
+   or creates a 201 Created response effect."
+  ([]
+   (fx/map> (fn [body] (ring-resp/status (ring-resp/response body) 201))))
+  ([eff-or-url]
+   (if (fx/effect? eff-or-url)
+     (fx/map> eff-or-url (fn [body] (ring-resp/status (ring-resp/response body) 201)))
+     (fx/succeed> (ring-resp/created eff-or-url))))
+  ([eff-or-url url-or-body]
+   (if (fx/effect? eff-or-url)
+     (fx/map> eff-or-url (fn [body] (ring-resp/created url-or-body body)))
+     (fx/succeed> (ring-resp/created eff-or-url url-or-body))))
   ([eff url body]
    (-> eff (fx/map> (fn [_] (ring-resp/created url body))))))
 
 (defn bad-request>
-  "Creates an effect yielding a 400 Bad Request Ring response map."
+  "Transforms the value of `eff` into a 400 Bad Request Ring response map,
+   or creates a 400 Bad Request response effect."
   ([]
-   (fx/succeed> (ring-resp/bad-request nil)))
-  ([body]
-   (fx/succeed> (ring-resp/bad-request body)))
+   (fx/map> (fn [body] (ring-resp/bad-request body))))
+  ([eff-or-body]
+   (if (fx/effect? eff-or-body)
+     (fx/map> eff-or-body (fn [body] (ring-resp/bad-request body)))
+     (fx/succeed> (ring-resp/bad-request eff-or-body))))
   ([eff body]
    (-> eff (fx/map> (fn [_] (ring-resp/bad-request body))))))
 
 (defn not-found>
-  "Creates an effect yielding a 404 Not Found Ring response map."
+  "Transforms the value of `eff` into a 404 Not Found Ring response map,
+   or creates a 404 Not Found response effect."
   ([]
-   (fx/succeed> (ring-resp/not-found nil)))
-  ([body]
-   (fx/succeed> (ring-resp/not-found body)))
+   (fx/map> (fn [body] (ring-resp/not-found body))))
+  ([eff-or-body]
+   (if (fx/effect? eff-or-body)
+     (fx/map> eff-or-body (fn [body] (ring-resp/not-found body)))
+     (fx/succeed> (ring-resp/not-found eff-or-body))))
   ([eff body]
    (-> eff (fx/map> (fn [_] (ring-resp/not-found body))))))
 
 (defn internal-server-error>
-  "Creates an effect yielding a 500 Internal Server Error Ring response map."
+  "Transforms the value of `eff` into a 500 Internal Server Error Ring response map,
+   or creates a 500 Internal Server Error response effect."
   ([]
-   (fx/succeed> (ring-resp/status (ring-resp/response nil) 500)))
-  ([body]
-   (fx/succeed> (ring-resp/status (ring-resp/response body) 500)))
+   (fx/map> (fn [body] (ring-resp/status (ring-resp/response body) 500))))
+  ([eff-or-body]
+   (if (fx/effect? eff-or-body)
+     (fx/map> eff-or-body (fn [body] (ring-resp/status (ring-resp/response body) 500)))
+     (fx/succeed> (ring-resp/status (ring-resp/response eff-or-body) 500))))
   ([eff body]
    (-> eff (fx/map> (fn [_] (ring-resp/status (ring-resp/response body) 500))))))
 
@@ -71,8 +95,10 @@
   "Creates an effect yielding a 302 (or custom status) Redirect Ring response map."
   ([url]
    (fx/succeed> (ring-resp/redirect url)))
-  ([url status-code]
-   (fx/succeed> (ring-resp/redirect url status-code)))
+  ([eff-or-url url-or-status]
+   (if (fx/effect? eff-or-url)
+     (fx/map> eff-or-url (fn [_] (ring-resp/redirect url-or-status)))
+     (fx/succeed> (ring-resp/redirect eff-or-url url-or-status))))
   ([eff url status-code]
    (-> eff (fx/map> (fn [_] (ring-resp/redirect url status-code))))))
 

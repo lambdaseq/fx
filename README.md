@@ -131,7 +131,7 @@ The core module provides the primitives to build, compose, and execute pure effe
 
 ### 4. `fx.ring` — Declarative Ring Web Services
 
-`fx.ring` integrates pure effect pipelines into Ring HTTP servers. It translates endpoints into 1-arity synchronous or 3-arity asynchronous Ring handlers, binds incoming requests to ambient context, and automatically maps failure channels into appropriate HTTP status responses.
+`fx.ring` integrates pure effect pipelines into Ring HTTP servers. It translates effect handlers (`req -> effect`) into 1-arity synchronous or 3-arity asynchronous Ring handlers, binds incoming requests to ambient context, and automatically maps failure channels into appropriate HTTP status responses.
 
 ```clojure
 (ns example.web
@@ -139,15 +139,13 @@ The core module provides the primitives to build, compose, and execute pure effe
             [fx.ring :as fx-ring]
             [fx.ring.response :as fx-resp]))
 
-(def endpoint
-  (-> (fx-resp/request> :params)
-      (fx/mapcat> (fn [{:keys [name]}]
-                    (if name
-                      (fx-resp/ok> (str "Hello, " name "!"))
-                      (fx/fail> :bad-request {:message "Missing name parameter"}))))))
+(defn greet-handler [req]
+  (if-let [name (get-in req [:params :name])]
+    (fx-resp/ok> (str "Hello, " name "!"))
+    (fx/fail> :bad-request {:message "Missing name parameter"})))
 
 (def app
-  (fx-ring/wrap-fx endpoint
+  (fx-ring/wrap-fx greet-handler
     {:failure-map {:bad-request (fn [err req] {:status 400 :body (:message err)})}}))
 ```
 

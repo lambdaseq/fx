@@ -69,6 +69,7 @@ A full-stack functional Clojure REST API demonstrating how to build web services
 example/
 ├── deps.edn             # Standalone project dependencies & aliases
 ├── README.md            # Architecture, usage, and API guide
+├── test.http            # Interactive HTTP requests for IntelliJ / REST Client
 ├── src/
 │   └── todo/
 │       ├── db.clj       # SQLite datasource, DDL, and HoneySQL queries
@@ -118,6 +119,10 @@ Or from the `example/` directory:
 cd example
 clojure -M:test -e "(require 'clojure.test 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test) (let [res (clojure.test/run-tests 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test)] (when (pos? (+ (:fail res) (:error res))) (System/exit 1)))"
 ```
+
+### 3. Interactive HTTP Requests (`test.http`)
+
+When the server is running on `http://localhost:3000`, open [`example/test.http`](test.http) in IntelliJ IDEA or your editor's HTTP/REST client to execute requests interactively (CRUD operations, query filtering, and validation error scenarios).
 
 ---
 

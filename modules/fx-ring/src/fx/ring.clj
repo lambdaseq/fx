@@ -96,7 +96,7 @@
           (raise t)))))))
 
 (defn wrap-fx
-  "Converts a pure IEffect pipeline into a standard Ring HTTP handler.
+  "Converts an effect handler function (fn [req] -> effect) into a standard Ring HTTP handler.
    Supports 1-arity synchronous (fn [req]) and 3-arity asynchronous (fn [req respond raise]).
 
    Options:
@@ -105,24 +105,28 @@
      :services        - Alias for :provider
      :failure-map     - Map of failure tags to handler functions (fn [error-data req])
      :default-handler - Fallback failure handler function (fn [failure req])"
-  ([effect]
-   (wrap-fx effect nil))
-  ([effect opts]
-   (assert (fx/effect? effect) "wrap-fx expects an IEffect instance")
+  ([handler]
+   (wrap-fx handler nil))
+  ([handler opts]
+   (assert (ifn? handler) "wrap-fx expects a handler function (fn [req])")
    (fn
      ([req]
-      (let [ctx (build-fx-context req opts)
-            res (fx/run-sync! effect ctx)]
-        (resolve-failure-to-response res req opts)))
+      (let [effect (handler req)]
+        (assert (fx/effect? effect) "handler must return an IEffect instance")
+        (let [ctx (build-fx-context req opts)
+              res (fx/run-sync! effect ctx)]
+          (resolve-failure-to-response res req opts))))
      ([req respond raise]
       (try
-        (let [ctx (build-fx-context req opts)
-              ^CompletableFuture cf (fx/run-async! effect ctx)]
-          (.whenComplete cf
-            (reify BiConsumer
-              (accept [_ val err]
-                (if err
-                  (raise err)
-                  (respond (resolve-failure-to-response val req opts)))))))
+        (let [effect (handler req)]
+          (assert (fx/effect? effect) "handler must return an IEffect instance")
+          (let [ctx (build-fx-context req opts)
+                ^CompletableFuture cf (fx/run-async! effect ctx)]
+            (.whenComplete cf
+              (reify BiConsumer
+                (accept [_ val err]
+                  (if err
+                    (raise err)
+                    (respond (resolve-failure-to-response val req opts))))))))
         (catch Throwable t
           (raise t)))))))
