@@ -701,14 +701,50 @@
       [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
       (if (failure? val)
         [nil val context stack]
-        (if (effect? inner-effect)
+        (cond
+          (effect? inner-effect)
           [(chain> (succeed> val) inner-effect) nil context stack]
-          (if (fn? inner-effect)
-            (let [res (inner-effect val)]
-              (if (effect? res)
-                [(chain> (succeed> val) res) nil context stack]
-                [nil (make-failure :mapcat>-result-not-an-effect {:result res}) context stack]))
-            [nil (make-failure :mapcat>-result-not-an-effect {:result inner-effect}) context stack]))))))
+
+          (fn? inner-effect)
+          (let [res (inner-effect val)]
+            (cond
+              (effect? res)
+              [(chain> (succeed> val) res) nil context stack]
+
+              (failure? res)
+              [nil res context stack]
+
+              :else
+              [nil (make-failure :mapcat>-result-not-an-effect {:result res}) context stack]))
+
+          (failure? inner-effect)
+          [nil inner-effect context stack]
+
+          :else
+          [nil (make-failure :mapcat>-result-not-an-effect {:result inner-effect}) context stack])))))
+
+(defrecord MapcatCtxEffect [tag prev-effect data f]
+  ITagged
+  (tag [_] tag)
+  IEffect
+  (prev-effect [_] prev-effect)
+  (-step [this val context stack]
+    (if (some? prev-effect)
+      [prev-effect val context (conj stack (->StepEffectFrame (assoc this :prev-effect nil)))]
+      (if (failure? val)
+        [nil val context stack]
+        (if (fn? f)
+          (let [res (f val context)]
+            (if (effect? res)
+              [(chain> (succeed> val) res) nil context stack]
+              (if (failure? res)
+                [nil res context stack]
+                [nil (make-failure :mapcat-ctx>-result-not-an-effect {:result res}) context stack])))
+          (if (effect? f)
+            [(chain> (succeed> val) f) nil context stack]
+            (if (failure? f)
+              [nil f context stack]
+              [nil (make-failure :mapcat-ctx>-result-not-an-effect {:result f}) context stack])))))))
 
 (defrecord IfEffect [tag prev-effect data cond then else]
   ITagged
@@ -1176,6 +1212,18 @@
    (mapcat> nil inner-effect))
   ([prev-effect inner-effect]
    (->MapcatEffect :mapcat prev-effect {:inner-effect inner-effect} inner-effect)))
+
+(defn mapcat-ctx>
+  "Flat-maps over an effect by applying a binary effect-producing function `(f value context)`
+   to the successful value and active context. Short-circuits if the upstream effect yielded a failure.
+
+   Supports point-free pipeline usage:
+     (-> (fx/succeed> 10)
+         (fx/mapcat-ctx> (fn [v ctx] (fx/succeed> (* v (:multiplier ctx 1))))))"
+  ([f]
+   (mapcat-ctx> nil f))
+  ([prev-effect f]
+   (->MapcatCtxEffect :mapcat-ctx prev-effect {:f f} f)))
 
 (defn if>
   "Conditional branching combinator. Evaluates `cond-eff` with the current value:

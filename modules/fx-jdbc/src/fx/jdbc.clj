@@ -2,8 +2,7 @@
   (:require [fx.core :as fx]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
-  (:import (fx.core IEffect ITagged StepEffectFrame)
-           (java.sql Connection PreparedStatement SQLException)
+  (:import (java.sql Connection PreparedStatement SQLException)
            (javax.sql DataSource)))
 
 ;; ---------------------------------------------------------------------------
@@ -198,122 +197,127 @@
 ;; Transactions & Dual Failure Rollback
 ;; ---------------------------------------------------------------------------
 
-(defn- apply-tx-options! [^Connection conn opts]
-  (when (contains? opts :read-only)
-    (.setReadOnly conn (boolean (:read-only opts))))
-  (when (contains? opts :isolation)
-    (let [iso (:isolation opts)
-          iso-val (if (keyword? iso)
-                    (case iso
-                      :none Connection/TRANSACTION_NONE
-                      :read-uncommitted Connection/TRANSACTION_READ_UNCOMMITTED
-                      :read-committed Connection/TRANSACTION_READ_COMMITTED
-                      :repeatable-read Connection/TRANSACTION_REPEATABLE_READ
-                      :serializable Connection/TRANSACTION_SERIALIZABLE)
-                    iso)]
-      (.setTransactionIsolation conn iso-val))))
+(def ^:private isolation-levels
+  {:none             Connection/TRANSACTION_NONE
+   :read-uncommitted Connection/TRANSACTION_READ_UNCOMMITTED
+   :read-committed   Connection/TRANSACTION_READ_COMMITTED
+   :repeatable-read  Connection/TRANSACTION_REPEATABLE_READ
+   :serializable     Connection/TRANSACTION_SERIALIZABLE})
 
-(defn- begin-tx! [^Connection conn opts]
-  (if-not (.getAutoCommit conn)
-    ;; Already inside an active transaction -> use savepoint
-    (let [sp (.setSavepoint conn)]
-      {:type      :savepoint
-       :conn      conn
-       :savepoint sp
-       :status    (atom :active)})
-    ;; Root transaction
-    (let [orig-auto-commit (.getAutoCommit conn)
-          orig-read-only (.isReadOnly conn)
-          orig-isolation (.getTransactionIsolation conn)]
-      (.setAutoCommit conn false)
-      (apply-tx-options! conn opts)
-      {:type             :root
-       :conn             conn
-       :orig-auto-commit orig-auto-commit
-       :orig-read-only   orig-read-only
-       :orig-isolation   orig-isolation
-       :status           (atom :active)})))
+(defn- cleanup-tx-connection! [^Connection conn is-new? old-auto-commit old-isolation old-read-only]
+  (try
+    (when (some? old-isolation)
+      (.setTransactionIsolation conn old-isolation))
+    (catch Throwable _ nil))
+  (try
+    (when (some? old-read-only)
+      (.setReadOnly conn old-read-only))
+    (catch Throwable _ nil))
+  (try
+    (when (true? old-auto-commit)
+      (.setAutoCommit conn true))
+    (catch Throwable _ nil))
+  (try
+    (when is-new?
+      (.close conn))
+    (catch Throwable _ nil)))
 
-(defn- commit-tx! [{:keys [type ^Connection conn savepoint status]}]
-  (when (= @status :active)
-    (if (= type :savepoint)
-      (try (.releaseSavepoint conn savepoint) (catch Throwable _ nil))
-      (.commit conn))
-    (reset! status :committed)))
+(defn- rollback-tx! [^Connection conn is-new? sp old-auto-commit old-isolation old-read-only]
+  (try
+    (if (some? sp)
+      (.rollback conn sp)
+      (.rollback conn))
+    (catch Throwable _ nil))
+  (cleanup-tx-connection! conn is-new? old-auto-commit old-isolation old-read-only))
 
-(defn- rollback-tx! [{:keys [type ^Connection conn savepoint status]}]
-  (when (= @status :active)
-    (if (= type :savepoint)
-      (try (.rollback conn savepoint) (catch Throwable _ nil))
-      (try (.rollback conn) (catch Throwable _ nil)))
-    (reset! status :rolled-back)))
-
-(defn- cleanup-tx-state! [{:keys [type ^Connection conn orig-auto-commit orig-read-only orig-isolation status] :as tx-state}]
-  (when (= @status :active)
-    (rollback-tx! tx-state))
-  (when (= type :root)
+(defn- commit-tx! [^Connection conn is-new? sp old-auto-commit old-isolation old-read-only opts]
+  (if (true? (:rollback-only opts))
+    (do
+      (rollback-tx! conn is-new? sp old-auto-commit old-isolation old-read-only)
+      nil)
     (try
-      (when (some? orig-read-only) (.setReadOnly conn orig-read-only))
-      (when (some? orig-isolation) (.setTransactionIsolation conn orig-isolation))
-      (when (some? orig-auto-commit) (.setAutoCommit conn orig-auto-commit))
-      (catch Throwable _ nil))))
+      (if (some? sp)
+        (try (.releaseSavepoint conn sp) (catch Throwable _ nil))
+        (.commit conn))
+      (cleanup-tx-connection! conn is-new? old-auto-commit old-isolation old-read-only)
+      nil
+      (catch Throwable e
+        (rollback-tx! conn is-new? sp old-auto-commit old-isolation old-read-only)
+        (jdbc-failure e nil)))))
 
-(defn- run-tx-on-conn> [^Connection conn opts tx-eff]
-  (fx/acquire-release>
-    (fx/try>
-      (fx/map> (fn [_] (begin-tx! conn opts)))
-      (fn [e] (jdbc-failure e nil)))
-    (fn [tx-state]
-      (if (fx/failure? tx-state)
-        (fx/succeed> tx-state)
-        (-> tx-eff
-            (fx/provide> {::datasource conn ::connection conn ::transaction conn})
-            (fx/match>
-              (fn [failure-val]
-                (rollback-tx! tx-state)
-                failure-val)
-              (fn [success-val]
-                (if (:rollback-only opts)
-                  (do
-                    (rollback-tx! tx-state)
-                    success-val)
-                  (fx/try>
-                    (fx/map> (fn [_]
-                               (commit-tx! tx-state)
-                               success-val))
-                    (fn [e]
-                      (rollback-tx! tx-state)
-                      (jdbc-failure e nil)))))))))
-    (fn [tx-state]
-      (fx/map> (fn [_]
-                 (when-not (fx/failure? tx-state)
-                   (cleanup-tx-state! tx-state)))))))
+(defrecord TransactionFrame [conn is-new? sp old-auto-commit old-isolation old-read-only opts original-context]
+  fx/IContinuation
+  (-resume [_ res _current-context stack]
+    (if (fx/failure? res)
+      (do
+        (rollback-tx! conn is-new? sp old-auto-commit old-isolation old-read-only)
+        [nil res original-context stack])
+      (if-let [err (commit-tx! conn is-new? sp old-auto-commit old-isolation old-read-only opts)]
+        [nil err original-context stack]
+        [nil res original-context stack])))
 
-(defrecord TransactionEffect [tag prev-effect data connectable opts tx-eff]
-  ITagged
+  fx/IUnwindable
+  (-unwind [_ _ _]
+    (rollback-tx! conn is-new? sp old-auto-commit old-isolation old-read-only)
+    nil))
+
+(defrecord TransactionEffect [tag prev-effect data connectable opts eff]
+  fx/ITagged
   (tag [_] tag)
-  IEffect
+
+  fx/IEffect
   (prev-effect [_] prev-effect)
+
   (-step [this val context stack]
     (if (some? prev-effect)
-      [prev-effect val context (conj stack (StepEffectFrame. (assoc this :prev-effect nil)))]
+      [prev-effect val context (conj stack (fx/->StepEffectFrame (assoc this :prev-effect nil)))]
       (if (fx/failure? val)
         [nil val context stack]
         (let [target (resolve-connectable connectable val context)]
           (if (nil? target)
             [nil (missing-connectable-failure) context stack]
-            (let [eff (if (instance? Connection target)
-                        (run-tx-on-conn> target opts tx-eff)
-                        (fx/acquire-release>
-                          (get-connection> target opts)
-                          (fn [conn]
-                            (run-tx-on-conn> conn opts tx-eff))
-                          (fn [conn]
-                            (close-connection> conn))))]
-              [eff nil context stack])))))))
+            (try
+              (let [is-conn? (instance? Connection target)
+                    is-new?  (not is-conn?)
+                    ^Connection conn (if is-conn?
+                                       target
+                                       (jdbc/get-connection target (dissoc (or opts {}) :isolation :read-only :rollback-only)))
+                    nested?  (and is-conn? (not (.getAutoCommit conn)))
+                    sp       (when nested? (.setSavepoint conn))
+                    old-auto-commit (when-not nested? (if is-conn? (.getAutoCommit conn) true))
+                    old-isolation   (when (and (not nested?) (some? (:isolation opts)))
+                                      (.getTransactionIsolation conn))
+                    old-read-only   (when (and (not nested?) (some? (:read-only opts)))
+                                      (.isReadOnly conn))]
+                (when-not nested?
+                  (when-let [iso (:isolation opts)]
+                    (.setTransactionIsolation conn (get isolation-levels iso iso)))
+                  (when-let [ro (:read-only opts)]
+                    (.setReadOnly conn (boolean ro)))
+                  (when (.getAutoCommit conn)
+                    (.setAutoCommit conn false)))
+                (let [child-ctx (assoc context
+                                  ::datasource conn
+                                  ::connection conn
+                                  ::transaction conn
+                                  :fx.jdbc/datasource conn
+                                  :fx.jdbc/connection conn
+                                  :fx.jdbc/transaction conn)
+                      inner-eff (cond
+                                  (and (some? val) (fx/effect? eff) (nil? (:prev-effect eff)))
+                                  (fx/chain> (fx/succeed> val) eff)
+
+                                  (fx/effect? eff)
+                                  eff
+
+                                  :else
+                                  (fx/succeed> val))]
+                  [inner-eff nil child-ctx (conj stack (->TransactionFrame conn is-new? sp old-auto-commit old-isolation old-read-only opts context))]))
+              (catch Throwable e
+                [nil (jdbc-failure e nil) context stack]))))))))
 
 (defn with-transaction>
-  "Executes `tx-eff` within a JDBC transaction boundary.
+  "Executes `tx-eff` within a JDBC transaction boundary as a higher-order effect.
    Automatically commits on effect success, and rolls back if the inner effect
    evaluates to an `IFailure` OR throws an exception.
    Supports transaction options: `:isolation`, `:read-only`, and `:rollback-only`.
@@ -329,9 +333,10 @@
        (with-transaction> nil a b)
        (with-transaction> a nil b))))
   ([connectable opts tx-eff]
-   (if (fx/effect? connectable)
-     (->TransactionEffect :with-transaction nil {:connectable opts :opts tx-eff :tx-eff connectable} opts tx-eff connectable)
-     (->TransactionEffect :with-transaction nil {:connectable connectable :opts opts :tx-eff tx-eff} connectable opts tx-eff))))
+   (let [eff     (if (fx/effect? connectable) connectable tx-eff)
+         conn    (if (fx/effect? connectable) opts connectable)
+         options (if (fx/effect? connectable) tx-eff opts)]
+     (->TransactionEffect :transaction nil {:connectable conn :opts options :eff eff} conn options eff))))
 
 ;; ---------------------------------------------------------------------------
 ;; Statement & Query Execution

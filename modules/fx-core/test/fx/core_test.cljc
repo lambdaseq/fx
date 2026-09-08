@@ -521,6 +521,25 @@
       (is (failure? res))
       (is (= :err (:tag res))))))
 
+(deftest mapcat-ctx>-test
+  (testing "mapcat-ctx> accesses value and context and returns effect"
+    (let [res (-> (succeed> 10)
+                  (mapcat-ctx> (fn [v ctx] (succeed> (* v (:multiplier ctx 1)))))
+                  (run-sync! {:multiplier 5}))]
+      (is (= 50 res))))
+  (testing "mapcat-ctx> propagates upstream failure"
+    (let [res (-> (fail> :err {:code 500})
+                  (mapcat-ctx> (fn [v ctx] (succeed> (+ v (:inc ctx 1)))))
+                  (run-sync! {:inc 1}))]
+      (is (failure? res))
+      (is (= :err (:tag res)))))
+  (testing "mapcat-ctx> handles failure returned from function"
+    (let [res (-> (succeed> 10)
+                  (mapcat-ctx> (fn [_ _] (fail> :inner-err {:code 400})))
+                  (run-sync!))]
+      (is (failure? res))
+      (is (= :inner-err (:tag res))))))
+
 (deftest do-ctx>-test
   (testing "do-ctx> performs side-effect with context and passes value through unchanged"
     (let [logs (atom [])
