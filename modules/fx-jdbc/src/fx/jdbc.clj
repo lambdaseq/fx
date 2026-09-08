@@ -19,14 +19,14 @@
 (def as-modified-maps rs/as-modified-maps)
 
 ;; ---------------------------------------------------------------------------
-;; Typed Error Constructors
+;; Typed Failure Constructors
 ;; ---------------------------------------------------------------------------
 
-(defn jdbc-error
+(defn jdbc-failure
   "Constructs a typed failure with tag `:jdbc/error` capturing SQLState, error codes,
    and optional statement context."
   ([e]
-   (jdbc-error e nil))
+   (jdbc-failure e nil))
   ([^Throwable e statement]
    (if (instance? SQLException e)
      (let [^SQLException sqle e]
@@ -41,26 +41,11 @@
                        :statement statement
                        :cause     e}))))
 
-(defn missing-connectable-error
+(defn missing-connectable-failure
   "Constructs a typed failure when no connectable is supplied and ::datasource is absent in context."
   []
   (fx/make-failure :jdbc/missing-connectable
                    {:message "No connectable provided and ::datasource not found in context"}))
-
-(defmacro catch-jdbc
-  "Evaluates `body` within a try/catch block, converting any thrown `Throwable`
-   into a typed `:jdbc/error` failure."
-  ([body]
-   `(try
-      ~body
-      (catch Throwable e#
-        (jdbc-error e# nil))))
-  ([statement-context body & more-body]
-   `(try
-      ~body
-      ~@more-body
-      (catch Throwable e#
-        (jdbc-error e# ~statement-context)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Connectable Resolution Helpers
@@ -81,7 +66,12 @@
   (or explicit-conn
       (when (and (some? upstream-val) (not (fx/failure? upstream-val)) (connectable? upstream-val))
         upstream-val)
-      (::datasource ctx)))
+      (::transaction ctx)
+      (:fx.jdbc/transaction ctx)
+      (::connection ctx)
+      (:fx.jdbc/connection ctx)
+      (::datasource ctx)
+      (:fx.jdbc/datasource ctx)))
 
 (defn- parse-exec-args-2 [a b]
   (cond
@@ -109,52 +99,100 @@
 (defn get-datasource>
   "Creates an effect yielding a `javax.sql.DataSource` from a db-spec map or string."
   [db-spec]
-  (fx/try> (fn [] (jdbc/get-datasource db-spec))
-           (fn [e] (jdbc-error e nil))))
+  (fx/try> (fx/map> (fn [_] (jdbc/get-datasource db-spec)))
+           (fn [e] (jdbc-failure e nil))))
 
 (defn get-connection>
-  "Creates an effect acquiring a `java.sql.Connection` from `connectable` (or ::datasource in context)."
+  "Creates an effect acquiring a `java.sql.Connection` from `connectable` (or ::connection / ::datasource in context)."
   ([]
    (get-connection> nil nil))
   ([connectable]
    (get-connection> connectable nil))
   ([connectable opts]
-   (fx/map-ctx>
-     (fn [val ctx]
-       (catch-jdbc
+   (fx/try>
+     (fx/map-ctx>
+       (fn [val ctx]
          (let [target (resolve-connectable connectable val ctx)]
            (if (nil? target)
-             (missing-connectable-error)
-             (if (nil? opts)
-               (jdbc/get-connection target)
-               (jdbc/get-connection target opts)))))))))
+             (missing-connectable-failure)
+             (if (instance? Connection target)
+               target
+               (if (nil? opts)
+                 (jdbc/get-connection target)
+                 (jdbc/get-connection target opts)))))))
+     (fn [e] (jdbc-failure e nil)))))
 
 (defn close-connection>
   "Creates an effect closing an `AutoCloseable` connection or statement."
   [conn]
-  (fx/map>
-    (fn [_]
-      (when (and conn (instance? java.lang.AutoCloseable conn))
-        (try
-          (.close ^java.lang.AutoCloseable conn)
-          (catch Throwable _ nil)))
-      nil)))
+  (fx/try>
+    (fx/map>
+      (fn [_]
+        (when (and conn (instance? java.lang.AutoCloseable conn))
+          (.close ^java.lang.AutoCloseable conn))
+        nil))
+    (fx/succeed> nil)))
 
 (defn with-connection>
-  "Executes `use-eff-fn` within a scoped connection, ensuring deterministic close
-   and dynamically binding ::datasource in context."
-  ([use-eff-fn]
-   (with-connection> nil nil use-eff-fn))
-  ([connectable use-eff-fn]
-   (with-connection> connectable nil use-eff-fn))
-  ([connectable opts use-eff-fn]
+  "Executes `eff` within a scoped connection, ensuring deterministic close
+   and dynamically binding `::datasource` and `::connection` in context.
+   Resolves connectable from explicit `connectable`, upstream value, or context."
+  ([eff]
+   (with-connection> nil nil eff))
+  ([a b]
+   (if (fx/effect? a)
+     (if (and (map? b) (not (connectable-map? b)))
+       (with-connection> nil b a)
+       (with-connection> b nil a))
+     (if (and (map? a) (not (connectable-map? a)))
+       (with-connection> nil a b)
+       (with-connection> a nil b))))
+  ([connectable opts eff]
    (fx/acquire-release>
      (get-connection> connectable opts)
      (fn [conn]
-       (let [eff (use-eff-fn conn)]
-         (fx/provide-service> ::datasource conn eff)))
+       (fx/provide> {::datasource conn ::connection conn} eff))
      (fn [conn]
        (close-connection> conn)))))
+
+(defn provide-datasource>
+  "Executes `eff` within a dynamic context where `::datasource` is bound to `ds`.
+   Supports point-free pipeline threading and standalone wrapping:
+     (-> (sql/query!> [\"SELECT * FROM users\"])
+         (fx-jdbc/provide-datasource> ds))
+     (fx-jdbc/provide-datasource> ds eff)"
+  ([ds]
+   (fx/provide-service> ::datasource ds))
+  ([a b]
+   (if (fx/effect? a)
+     (fx/provide-service> ::datasource b a)
+     (fx/provide-service> ::datasource a b))))
+
+(defn provide-connection>
+  "Executes `eff` within a dynamic context where `::connection` is bound to `conn`.
+   Supports point-free pipeline threading and standalone wrapping:
+     (-> (sql/query!> [\"SELECT * FROM users\"])
+         (fx-jdbc/provide-connection> conn))
+     (fx-jdbc/provide-connection> conn eff)"
+  ([conn]
+   (fx/provide-service> ::connection conn))
+  ([a b]
+   (if (fx/effect? a)
+     (fx/provide-service> ::connection b a)
+     (fx/provide-service> ::connection a b))))
+
+(defn provide-transaction>
+  "Executes `eff` within a dynamic context where `::transaction` is bound to `tx`.
+   Supports point-free pipeline threading and standalone wrapping:
+     (-> (sql/insert!> :users {:name \"Alice\"})
+         (fx-jdbc/provide-transaction> tx))
+     (fx-jdbc/provide-transaction> tx eff)"
+  ([tx]
+   (fx/provide-service> ::transaction tx))
+  ([a b]
+   (if (fx/effect? a)
+     (fx/provide-service> ::transaction b a)
+     (fx/provide-service> ::transaction a b))))
 
 ;; ---------------------------------------------------------------------------
 ;; Transactions & Dual Failure Rollback
@@ -220,16 +258,16 @@
       (when (some? orig-auto-commit) (.setAutoCommit conn orig-auto-commit))
       (catch Throwable _ nil))))
 
-(defn- run-tx-on-conn> [^Connection conn opts tx-eff-fn]
+(defn- run-tx-on-conn> [^Connection conn opts tx-eff]
   (fx/acquire-release>
-    (fx/map> (fn [_]
-               (catch-jdbc
-                 (begin-tx! conn opts))))
+    (fx/try>
+      (fx/map> (fn [_] (begin-tx! conn opts)))
+      (fn [e] (jdbc-failure e nil)))
     (fn [tx-state]
       (if (fx/failure? tx-state)
         (fx/succeed> tx-state)
-        (-> (tx-eff-fn conn)
-            (fx/provide-service> ::datasource conn)
+        (-> tx-eff
+            (fx/provide> {::datasource conn ::connection conn ::transaction conn})
             (fx/match>
               (fn [failure-val]
                 (rollback-tx! tx-state)
@@ -239,18 +277,19 @@
                   (do
                     (rollback-tx! tx-state)
                     success-val)
-                  (try
-                    (commit-tx! tx-state)
-                    success-val
-                    (catch Throwable e
+                  (fx/try>
+                    (fx/map> (fn [_]
+                               (commit-tx! tx-state)
+                               success-val))
+                    (fn [e]
                       (rollback-tx! tx-state)
-                      (jdbc-error e nil)))))))))
+                      (jdbc-failure e nil)))))))))
     (fn [tx-state]
       (fx/map> (fn [_]
                  (when-not (fx/failure? tx-state)
                    (cleanup-tx-state! tx-state)))))))
 
-(defrecord TransactionEffect [tag prev-effect data connectable opts tx-eff-fn]
+(defrecord TransactionEffect [tag prev-effect data connectable opts tx-eff]
   ITagged
   (tag [_] tag)
   IEffect
@@ -260,34 +299,39 @@
       [prev-effect val context (conj stack (StepEffectFrame. (assoc this :prev-effect nil)))]
       (if (fx/failure? val)
         [nil val context stack]
-        (try
-          (let [target (resolve-connectable connectable val context)]
-            (if (nil? target)
-              [nil (missing-connectable-error) context stack]
-              (let [eff (if (instance? Connection target)
-                          (run-tx-on-conn> target opts tx-eff-fn)
-                          (with-connection> target opts
-                                            (fn [conn]
-                                              (run-tx-on-conn> conn opts tx-eff-fn))))]
-                [eff nil context stack])))
-          (catch Throwable e
-            [nil (jdbc-error e nil) context stack]))))))
+        (let [target (resolve-connectable connectable val context)]
+          (if (nil? target)
+            [nil (missing-connectable-failure) context stack]
+            (let [eff (if (instance? Connection target)
+                        (run-tx-on-conn> target opts tx-eff)
+                        (fx/acquire-release>
+                          (get-connection> target opts)
+                          (fn [conn]
+                            (run-tx-on-conn> conn opts tx-eff))
+                          (fn [conn]
+                            (close-connection> conn))))]
+              [eff nil context stack])))))))
 
 (defn with-transaction>
-  "Executes `tx-eff-fn` within a JDBC transaction boundary.
+  "Executes `tx-eff` within a JDBC transaction boundary.
    Automatically commits on effect success, and rolls back if the inner effect
    evaluates to an `IFailure` OR throws an exception.
-   Supports transaction options: `:isolation`, `:read-only`, and `:rollback-only`."
-  ([tx-eff-fn]
-   (with-transaction> nil nil tx-eff-fn))
+   Supports transaction options: `:isolation`, `:read-only`, and `:rollback-only`.
+   Connectable can be passed explicitly or resolved implicitly from context."
+  ([tx-eff]
+   (with-transaction> nil nil tx-eff))
   ([a b]
-   (if (fn? b)
+   (if (fx/effect? a)
+     (if (and (map? b) (not (connectable-map? b)))
+       (with-transaction> nil b a)
+       (with-transaction> b nil a))
      (if (and (map? a) (not (connectable-map? a)))
        (with-transaction> nil a b)
-       (with-transaction> a nil b))
-     (with-transaction> nil a b)))
-  ([connectable opts tx-eff-fn]
-   (->TransactionEffect :with-transaction nil {:connectable connectable :opts opts :tx-eff-fn tx-eff-fn} connectable opts tx-eff-fn)))
+       (with-transaction> a nil b))))
+  ([connectable opts tx-eff]
+   (if (fx/effect? connectable)
+     (->TransactionEffect :with-transaction nil {:connectable opts :opts tx-eff :tx-eff connectable} opts tx-eff connectable)
+     (->TransactionEffect :with-transaction nil {:connectable connectable :opts opts :tx-eff tx-eff} connectable opts tx-eff))))
 
 ;; ---------------------------------------------------------------------------
 ;; Statement & Query Execution
@@ -295,41 +339,43 @@
 
 (defn execute!>
   "Executes a SQL statement returning a vector of row maps or update counts.
-   Supports explicit connectable or context-resolved `::datasource`."
+   Supports explicit connectable or context-resolved `::connection` / `::datasource`."
   ([sql-params]
    (execute!> nil sql-params nil))
   ([a b]
    (let [[conn sql-params opts] (parse-exec-args-2 a b)]
      (execute!> conn sql-params opts)))
   ([connectable sql-params opts]
-   (fx/map-ctx>
-     (fn [val ctx]
-       (catch-jdbc sql-params
-                   (let [target (resolve-connectable connectable val ctx)]
-                     (if (nil? target)
-                       (missing-connectable-error)
-                       (if (nil? opts)
-                         (jdbc/execute! target sql-params)
-                         (jdbc/execute! target sql-params opts)))))))))
+   (fx/try>
+     (fx/map-ctx>
+       (fn [val ctx]
+         (let [target (resolve-connectable connectable val ctx)]
+           (if (nil? target)
+             (missing-connectable-failure)
+             (if (nil? opts)
+               (jdbc/execute! target sql-params)
+               (jdbc/execute! target sql-params opts))))))
+     (fn [e] (jdbc-failure e sql-params)))))
 
 (defn execute-one!>
   "Executes a SQL statement returning the first row map or `nil`.
-   Supports explicit connectable or context-resolved `::datasource`."
+   Supports explicit connectable or context-resolved `::connection` / `::datasource`."
   ([sql-params]
    (execute-one!> nil sql-params nil))
   ([a b]
    (let [[conn sql-params opts] (parse-exec-args-2 a b)]
      (execute-one!> conn sql-params opts)))
   ([connectable sql-params opts]
-   (fx/map-ctx>
-     (fn [val ctx]
-       (catch-jdbc sql-params
-                   (let [target (resolve-connectable connectable val ctx)]
-                     (if (nil? target)
-                       (missing-connectable-error)
-                       (if (nil? opts)
-                         (jdbc/execute-one! target sql-params)
-                         (jdbc/execute-one! target sql-params opts)))))))))
+   (fx/try>
+     (fx/map-ctx>
+       (fn [val ctx]
+         (let [target (resolve-connectable connectable val ctx)]
+           (if (nil? target)
+             (missing-connectable-failure)
+             (if (nil? opts)
+               (jdbc/execute-one! target sql-params)
+               (jdbc/execute-one! target sql-params opts))))))
+     (fn [e] (jdbc-failure e sql-params)))))
 
 (defn- parse-plan-args-4 [a b c d]
   (if (fn? c)
@@ -340,41 +386,44 @@
 
 (defn plan!>
   "Executes a streaming lazy reduction over SQL results via `next.jdbc/plan`.
-   Evaluates `(reduce reduce-fn initial-acc (next.jdbc/plan ...))` inside the effect."
+   Evaluates `(reduce reduce-fn initial-acc (next.jdbc/plan ...))` inside the effect.
+   Supports explicit connectable or context-resolved `::connection` / `::datasource`."
   ([sql-params reduce-fn initial-acc]
    (plan!> nil sql-params nil reduce-fn initial-acc))
   ([a b c d]
    (let [[conn sql-params opts reduce-fn initial-acc] (parse-plan-args-4 a b c d)]
      (plan!> conn sql-params opts reduce-fn initial-acc)))
   ([connectable sql-params opts reduce-fn initial-acc]
-   (fx/map-ctx>
-     (fn [val ctx]
-       (catch-jdbc sql-params
-                   (let [target (resolve-connectable connectable val ctx)]
-                     (if (nil? target)
-                       (missing-connectable-error)
-                       (let [plan (if (nil? opts)
-                                    (jdbc/plan target sql-params)
-                                    (jdbc/plan target sql-params opts))]
-                         (reduce reduce-fn initial-acc plan)))))))))
+   (fx/try>
+     (fx/map-ctx>
+       (fn [val ctx]
+         (let [target (resolve-connectable connectable val ctx)]
+           (if (nil? target)
+             (missing-connectable-failure)
+             (let [plan (if (nil? opts)
+                          (jdbc/plan target sql-params)
+                          (jdbc/plan target sql-params opts))]
+               (reduce reduce-fn initial-acc plan))))))
+     (fn [e] (jdbc-failure e sql-params)))))
 
 (defn prepare-statement>
-  "Creates an effect preparing a `java.sql.PreparedStatement` from `connectable` (or ::datasource in context)."
+  "Creates an effect preparing a `java.sql.PreparedStatement` from `connectable` (or ::connection / ::datasource in context)."
   ([sql-params]
    (prepare-statement> nil sql-params nil))
   ([a b]
    (let [[conn sql-params opts] (parse-exec-args-2 a b)]
      (prepare-statement> conn sql-params opts)))
   ([connectable sql-params opts]
-   (fx/map-ctx>
-     (fn [val ctx]
-       (catch-jdbc sql-params
-                   (let [target (resolve-connectable connectable val ctx)]
-                     (if (nil? target)
-                       (missing-connectable-error)
-                       (if (nil? opts)
-                         (jdbc/prepare target sql-params)
-                         (jdbc/prepare target sql-params opts)))))))))
+   (fx/try>
+     (fx/map-ctx>
+       (fn [val ctx]
+         (let [target (resolve-connectable connectable val ctx)]
+           (if (nil? target)
+             (missing-connectable-failure)
+             (if (nil? opts)
+               (jdbc/prepare target sql-params)
+               (jdbc/prepare target sql-params opts))))))
+     (fn [e] (jdbc-failure e sql-params)))))
 
 (defn with-prepared-statement>
   "Prepares a statement, executes `use-eff-fn` with the prepared statement, and guarantees closure."

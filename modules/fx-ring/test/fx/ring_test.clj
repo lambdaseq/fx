@@ -262,23 +262,19 @@
       ;; Initialize table
       (fx/run-sync!
         (fx-jdbc/with-connection> ds
-          (fn [_]
-            (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS items"])
-                (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE items (id INT PRIMARY KEY, name VARCHAR(255))"])))
-                (fx/mapcat> (fn [_] (sql/insert!> :items {:id 1 :name "Widget"})))
-                (fx/mapcat> (fn [_] (sql/insert!> :items {:id 2 :name "Gadget"})))))))
+          (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS items"])
+              (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE items (id INT PRIMARY KEY, name VARCHAR(255))"])))
+              (fx/mapcat> (fn [_] (sql/insert!> :items {:id 1 :name "Widget"})))
+              (fx/mapcat> (fn [_] (sql/insert!> :items {:id 2 :name "Gadget"}))))))
 
       (let [handler (fn [req]
                       (let [item-id (Integer/parseInt (or (get-in req [:params :id]) "1"))]
-                        (-> (fx/service> ::fx-jdbc/datasource)
-                            (fx/mapcat> (fn [conn-ds]
-                                          (fx-jdbc/with-connection> conn-ds
-                                            (fn [_]
-                                              (-> (sql/get-by-id!> :items item-id {:builder-fn fx-jdbc/as-unqualified-lower-maps})
-                                                  (fx/mapcat> (fn [item]
-                                                                (if item
-                                                                  (fx-resp/ok> item)
-                                                                  (fx/fail> :not-found {:status 404 :message (str "Item " item-id " not found")}))))))))))))
+                        (fx-jdbc/with-connection>
+                          (-> (sql/get-by-id!> :items item-id {:builder-fn fx-jdbc/as-unqualified-lower-maps})
+                              (fx/mapcat> (fn [item]
+                                            (if item
+                                              (fx-resp/ok> item)
+                                              (fx/fail> :not-found {:status 404 :message (str "Item " item-id " not found")}))))))))
             app (fx-ring/wrap-fx handler {:provider {::fx-jdbc/datasource ds}})
             item-res (app {:uri "/items" :params {:id "1"}})
             missing-res (app {:uri "/items" :params {:id "99"}})]

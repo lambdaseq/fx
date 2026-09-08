@@ -17,11 +17,10 @@
 (defn- init-accounts-table! [ds]
   (fx/run-sync!
     (fx-jdbc/with-connection> ds
-      (fn [_]
-        (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS accounts"])
-            (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE accounts (id INT PRIMARY KEY, name VARCHAR(255), balance INT)"])))
-            (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["INSERT INTO accounts (id, name, balance) VALUES (?, ?, ?)" 1 "Alice" 1000])))
-            (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["INSERT INTO accounts (id, name, balance) VALUES (?, ?, ?)" 2 "Bob" 500]))))))))
+      (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS accounts"])
+          (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE accounts (id INT PRIMARY KEY, name VARCHAR(255), balance INT)"])))
+          (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["INSERT INTO accounts (id, name, balance) VALUES (?, ?, ?)" 1 "Alice" 1000])))
+          (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["INSERT INTO accounts (id, name, balance) VALUES (?, ?, ?)" 2 "Bob" 500])))))))
 
 (deftest test-datasource-and-connection-lifecycle
   (testing "get-datasource> creates a valid DataSource for H2 and SQLite"
@@ -46,22 +45,46 @@
       (is (not (.isClosed ^Connection conn)))
       (fx/run-sync! (fx-jdbc/close-connection> conn))))
 
+  (testing "get-connection> acquires connection from context ::fx-jdbc/connection"
+    (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))
+          orig-conn (fx/run-sync! (fx-jdbc/get-connection> ds))
+          conn (fx/run-sync! (-> (fx-jdbc/get-connection>)
+                                 (fx/provide-service> ::fx-jdbc/connection orig-conn)))]
+      (is (instance? Connection conn))
+      (is (identical? orig-conn conn))
+      (is (not (.isClosed ^Connection conn)))
+      (fx/run-sync! (fx-jdbc/close-connection> orig-conn))))
+
   (testing "get-connection> returns missing-connectable failure when context and arg are empty"
     (let [res (fx/run-sync! (fx-jdbc/get-connection>))]
       (is (fx/failure? res))
       (is (= :jdbc/missing-connectable (fx/tag res)))))
 
-  (testing "with-connection> binds ::fx-jdbc/datasource in context and closes connection upon success"
+  (testing "with-connection> binds ::fx-jdbc/datasource and ::fx-jdbc/connection in context and closes connection upon success"
     (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))
           conn-ref (atom nil)
           res (fx/run-sync!
                 (fx-jdbc/with-connection> ds
-                  (fn [conn]
-                    (reset! conn-ref conn)
-                    (fx/map-ctx> (fn [_ ctx]
-                                   (is (identical? conn (::fx-jdbc/datasource ctx)))
-                                   :success-result)))))]
+                  (fx/map-ctx> (fn [_ ctx]
+                                 (reset! conn-ref (::fx-jdbc/connection ctx))
+                                 (is (identical? @conn-ref (::fx-jdbc/datasource ctx)))
+                                 (is (identical? @conn-ref (::fx-jdbc/connection ctx)))
+                                 :success-result))))]
       (is (= :success-result res))
+      (is (some? @conn-ref))
+      (is (.isClosed ^Connection @conn-ref))))
+
+  (testing "with-connection> resolves ::fx-jdbc/datasource from context implicitly"
+    (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))
+          conn-ref (atom nil)
+          res (fx/run-sync!
+                (-> (fx-jdbc/with-connection>
+                      (fx/map-ctx> (fn [_ ctx]
+                                     (reset! conn-ref (::fx-jdbc/connection ctx))
+                                     (is (identical? @conn-ref (::fx-jdbc/datasource ctx)))
+                                     :implicit-success)))
+                    (fx-jdbc/provide-datasource> ds)))]
+      (is (= :implicit-success res))
       (is (some? @conn-ref))
       (is (.isClosed ^Connection @conn-ref))))
 
@@ -70,9 +93,9 @@
           conn-ref (atom nil)
           res (fx/run-sync!
                 (fx-jdbc/with-connection> ds
-                  (fn [conn]
-                    (reset! conn-ref conn)
-                    (fx/fail> :business/error "insufficient funds"))))]
+                  (-> (fx/map-ctx> (fn [_ ctx]
+                                     (reset! conn-ref (::fx-jdbc/connection ctx))))
+                      (fx/mapcat> (fn [_] (fx/fail> :business/error "insufficient funds"))))))]
       (is (fx/failure? res))
       (is (= :business/error (fx/tag res)))
       (is (some? @conn-ref))
@@ -84,9 +107,9 @@
       (is (thrown? RuntimeException
             (fx/run-sync!
               (fx-jdbc/with-connection> ds
-                (fn [conn]
-                  (reset! conn-ref conn)
-                  (fx/map> (fn [_] (throw (RuntimeException. "Unexpected explosion")))))))))
+                (-> (fx/map-ctx> (fn [_ ctx]
+                                   (reset! conn-ref (::fx-jdbc/connection ctx))))
+                    (fx/map> (fn [_] (throw (RuntimeException. "Unexpected explosion")))))))))
       (is (some? @conn-ref))
       (is (.isClosed ^Connection @conn-ref)))))
 
@@ -95,35 +118,33 @@
     (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))]
       (fx/run-sync!
         (fx-jdbc/with-connection> ds
-          (fn [_]
-            (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS users"])
-                (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE users (id INT PRIMARY KEY, user_name VARCHAR(255), role VARCHAR(255), score INT)"])))
-                (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["INSERT INTO users (id, user_name, role, score) VALUES (?, ?, ?, ?)" 1 "Alice" "admin" 100])))
-                (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["INSERT INTO users (id, user_name, role, score) VALUES (?, ?, ?, ?)" 2 "Bob" "dev" 80])))
-                (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["INSERT INTO users (id, user_name, role, score) VALUES (?, ?, ?, ?)" 3 "Charlie" "dev" 90])))))))
+          (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS users"])
+              (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE users (id INT PRIMARY KEY, user_name VARCHAR(255), role VARCHAR(255), score INT)"])))
+              (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["INSERT INTO users (id, user_name, role, score) VALUES (?, ?, ?, ?)" 1 "Alice" "admin" 100])))
+              (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["INSERT INTO users (id, user_name, role, score) VALUES (?, ?, ?, ?)" 2 "Bob" "dev" 80])))
+              (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["INSERT INTO users (id, user_name, role, score) VALUES (?, ?, ?, ?)" 3 "Charlie" "dev" 90]))))))
 
       ;; Query with explicit connectable and context-resolved connectable
       (fx/run-sync!
         (fx-jdbc/with-connection> ds
-          (fn [_]
-            (fx/map>
-              (fn [_]
-                (let [users (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT * FROM users ORDER BY id ASC"] {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
-                                              (fx/provide-service> ::fx-jdbc/datasource ds)))
-                      alice (fx/run-sync! (-> (fx-jdbc/execute-one!> ["SELECT * FROM users WHERE id = ?" 1] {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
-                                              (fx/provide-service> ::fx-jdbc/datasource ds)))
-                      total-score (fx/run-sync! (-> (fx-jdbc/plan!> ["SELECT score FROM users"] {:builder-fn fx-jdbc/as-unqualified-lower-maps} (fn [acc row] (+ acc (:score row))) 0)
-                                                    (fx/provide-service> ::fx-jdbc/datasource ds)))]
-                  (is (= 3 (count users)))
-                  (is (= "Alice" (:user-name (first users))))
-                  (is (= {:id 1 :user-name "Alice" :role "admin" :score 100} alice))
-                  (is (= 270 total-score))))))))))
+          (fx/map>
+            (fn [_]
+              (let [users (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT * FROM users ORDER BY id ASC"] {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+                                            (fx-jdbc/provide-datasource> ds)))
+                    alice (fx/run-sync! (-> (fx-jdbc/execute-one!> ["SELECT * FROM users WHERE id = ?" 1] {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+                                            (fx-jdbc/provide-datasource> ds)))
+                    total-score (fx/run-sync! (-> (fx-jdbc/plan!> ["SELECT score FROM users"] {:builder-fn fx-jdbc/as-unqualified-lower-maps} (fn [acc row] (+ acc (:score row))) 0)
+                                                  (fx-jdbc/provide-datasource> ds)))]
+                (is (= 3 (count users)))
+                (is (= "Alice" (:user-name (first users))))
+                (is (= {:id 1 :user-name "Alice" :role "admin" :score 100} alice))
+                (is (= 270 total-score)))))))))
 
   (testing "typed JDBC error handling on invalid SQL"
     (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))
           res (fx/run-sync!
                 (-> (fx-jdbc/execute!> ["SELECT * FROM non_existent_table"])
-                    (fx/provide-service> ::fx-jdbc/datasource ds)))]
+                    (fx-jdbc/provide-datasource> ds)))]
       (is (fx/failure? res))
       (is (= :jdbc/error (fx/tag res)))
       (is (map? (fx/error-data res)))
@@ -135,7 +156,7 @@
       (init-accounts-table! ds)
       (let [res (fx/run-sync!
                   (-> (fx-jdbc/execute!> ["INSERT INTO accounts (id, name, balance) VALUES (?, ?, ?)" 1 "Duplicate" 200])
-                      (fx/provide-service> ::fx-jdbc/datasource ds)))]
+                      (fx-jdbc/provide-datasource> ds)))]
         (is (fx/failure? res))
         (is (= :jdbc/error (fx/tag res))))))
 
@@ -143,28 +164,59 @@
     (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))]
       (fx/run-sync!
         (fx-jdbc/with-connection> ds
-          (fn [conn]
-            (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS items"])
-                (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE items (id INT, val VARCHAR(255))"])))
-                (fx/mapcat> (fn [_]
-                              (fx-jdbc/with-prepared-statement> conn ["INSERT INTO items (id, val) VALUES (?, ?)" 1 "abc"]
-                                (fn [stmt]
-                                  (fx-jdbc/execute!> stmt []))))))))))))
+          (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS items"])
+              (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE items (id INT, val VARCHAR(255))"])))
+              (fx/mapcat> (fn [_]
+                            (fx-jdbc/with-prepared-statement> ["INSERT INTO items (id, val) VALUES (?, ?)" 1 "abc"]
+                              (fn [stmt]
+                                (fx-jdbc/execute!> stmt [])))))
+              (fx/mapcat> (fn [_]
+                            ;; Implicitly resolves ::fx-jdbc/connection in context
+                            (fx-jdbc/with-prepared-statement> ["INSERT INTO items (id, val) VALUES (?, ?)" 2 "def"]
+                              (fn [stmt]
+                                (fx-jdbc/execute!> stmt []))))))))))
 
 (deftest test-transaction-semantics-and-rollback
+  (testing "with-transaction> binds ::fx-jdbc/connection, ::fx-jdbc/datasource, and ::fx-jdbc/transaction in context"
+    (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))]
+      (init-accounts-table! ds)
+      (let [res (fx/run-sync!
+                  (fx-jdbc/with-connection> ds
+                    (fx-jdbc/with-transaction>
+                      (fx/map-ctx> (fn [_ ctx]
+                                     (is (some? (::fx-jdbc/datasource ctx)))
+                                     (is (some? (::fx-jdbc/connection ctx)))
+                                     (is (some? (::fx-jdbc/transaction ctx)))
+                                     (is (identical? (::fx-jdbc/connection ctx) (::fx-jdbc/transaction ctx)))
+                                     :tx-ok)))))]
+        (is (= :tx-ok res)))))
+
+  (testing "with-transaction> resolves ::fx-jdbc/datasource from context implicitly and scopes lifecycle"
+    (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))]
+      (init-accounts-table! ds)
+      (let [res (fx/run-sync!
+                  (-> (fx-jdbc/with-transaction>
+                        (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"])
+                            (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance + 100 WHERE id = 2"])))))
+                      (fx-jdbc/provide-datasource> ds)))
+            balances (fx/run-sync!
+                       (-> (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
+                                              {:builder-fn fx-jdbc/as-unqualified-lower-maps})
+                           (fx-jdbc/provide-datasource> ds)))]
+        (is (vector? res))
+        (is (= [{:id 1 :balance 900} {:id 2 :balance 600}] balances)))))
+
   (testing "with-transaction> commits changes upon successful completion"
     (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))]
       (init-accounts-table! ds)
       (let [res (fx/run-sync!
                   (fx-jdbc/with-connection> ds
-                    (fn [conn]
-                      (-> (fx-jdbc/with-transaction> conn
-                            (fn [_]
-                              (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"])
-                                  (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance + 100 WHERE id = 2"]))))))
-                          (fx/mapcat> (fn [_]
-                                        (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
-                                                           {:builder-fn fx-jdbc/as-unqualified-lower-maps})))))))]
+                    (-> (fx-jdbc/with-transaction>
+                          (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"])
+                              (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance + 100 WHERE id = 2"])))))
+                        (fx/mapcat> (fn [_]
+                                      (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
+                                                         {:builder-fn fx-jdbc/as-unqualified-lower-maps}))))))]
         (is (= [{:id 1 :balance 900} {:id 2 :balance 600}] res)))))
 
   (testing "with-transaction> rolls back changes when inner effect returns an IFailure"
@@ -172,19 +224,16 @@
       (init-accounts-table! ds)
       (let [tx-res (fx/run-sync!
                      (fx-jdbc/with-connection> ds
-                       (fn [conn]
-                         (fx-jdbc/with-transaction> conn
-                           (fn [_]
-                             (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"])
-                                 (fx/mapcat> (fn [_] (fx/fail> :transfer/insufficient-funds {:account 1})))))))))]
+                       (fx-jdbc/with-transaction>
+                         (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"])
+                             (fx/mapcat> (fn [_] (fx/fail> :transfer/insufficient-funds {:account 1})))))))]
         (is (fx/failure? tx-res))
         (is (= :transfer/insufficient-funds (fx/tag tx-res)))
         ;; Check balances remained unchanged
         (let [balances (fx/run-sync!
                          (fx-jdbc/with-connection> ds
-                           (fn [_]
-                             (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
-                                                {:builder-fn fx-jdbc/as-unqualified-lower-maps}))))]
+                           (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
+                                              {:builder-fn fx-jdbc/as-unqualified-lower-maps})))]
           (is (= [{:id 1 :balance 1000} {:id 2 :balance 500}] balances))))))
 
   (testing "with-transaction> rolls back changes when an unhandled exception is thrown"
@@ -193,17 +242,14 @@
       (is (thrown? RuntimeException
             (fx/run-sync!
               (fx-jdbc/with-connection> ds
-                (fn [conn]
-                  (fx-jdbc/with-transaction> conn
-                    (fn [_]
-                      (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"])
-                          (fx/map> (fn [_] (throw (RuntimeException. "Network partition simulating failure"))))))))))))
+                (fx-jdbc/with-transaction>
+                  (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"])
+                      (fx/map> (fn [_] (throw (RuntimeException. "Network partition simulating failure"))))))))))
       ;; Check balances remained unchanged
       (let [balances (fx/run-sync!
                        (fx-jdbc/with-connection> ds
-                         (fn [_]
-                           (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
-                                              {:builder-fn fx-jdbc/as-unqualified-lower-maps}))))]
+                         (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
+                                            {:builder-fn fx-jdbc/as-unqualified-lower-maps})))]
         (is (= [{:id 1 :balance 1000} {:id 2 :balance 500}] balances)))))
 
   (testing "with-transaction> rolls back when :rollback-only is true"
@@ -211,13 +257,11 @@
       (init-accounts-table! ds)
       (let [res (fx/run-sync!
                   (fx-jdbc/with-connection> ds
-                    (fn [conn]
-                      (-> (fx-jdbc/with-transaction> conn {:rollback-only true}
-                            (fn [_]
-                              (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"])))
-                          (fx/mapcat> (fn [_]
-                                        (fx-jdbc/execute!> ["SELECT id, balance FROM accounts WHERE id = 1"]
-                                                           {:builder-fn fx-jdbc/as-unqualified-lower-maps})))))))]
+                    (-> (fx-jdbc/with-transaction> {:rollback-only true}
+                          (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"]))
+                        (fx/mapcat> (fn [_]
+                                      (fx-jdbc/execute!> ["SELECT id, balance FROM accounts WHERE id = 1"]
+                                                         {:builder-fn fx-jdbc/as-unqualified-lower-maps}))))))]
         (is (= [{:id 1 :balance 1000}] res)))))
 
   (testing "with-transaction> nested transaction savepoints"
@@ -225,29 +269,51 @@
       (init-accounts-table! ds)
       (let [res (fx/run-sync!
                   (fx-jdbc/with-connection> ds
-                    (fn [conn]
-                      (-> (fx-jdbc/with-transaction> conn
-                            (fn [_]
-                              (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"])
-                                  (fx/mapcat> (fn [_]
-                                                (fx-jdbc/with-transaction> conn
-                                                  (fn [_]
-                                                    (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance + 500 WHERE id = 2"])
-                                                        (fx/mapcat> (fn [_] (fx/fail> :nested/error "nested rollback"))))))))
-                                  (fx/catch> {:nested/error (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance + 100 WHERE id = 2"])}))))
-                          (fx/mapcat> (fn [_]
-                                        (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
-                                                           {:builder-fn fx-jdbc/as-unqualified-lower-maps})))))))]
+                    (-> (fx-jdbc/with-transaction>
+                          (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 100 WHERE id = 1"])
+                              (fx/mapcat> (fn [_]
+                                            (fx-jdbc/with-transaction>
+                                              (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance + 500 WHERE id = 2"])
+                                                  (fx/mapcat> (fn [_] (fx/fail> :nested/error "nested rollback")))))))
+                              (fx/catch> {:nested/error (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance + 100 WHERE id = 2"])})))
+                        (fx/mapcat> (fn [_]
+                                      (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
+                                                         {:builder-fn fx-jdbc/as-unqualified-lower-maps}))))))]
         (is (= [{:id 1 :balance 900} {:id 2 :balance 600}] res))))))
+
+(deftest test-context-provider-functions
+  (testing "provide-transaction>, provide-connection>, provide-datasource> standalone and pipeline usage"
+    (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))
+          conn (fx/run-sync! (fx-jdbc/get-connection> ds))]
+      (init-accounts-table! ds)
+      ;; Standalone
+      (let [res-ds (fx/run-sync! (fx-jdbc/provide-datasource> ds (sql/query!> ["SELECT count(*) AS cnt FROM accounts"])))
+            res-conn (fx/run-sync! (fx-jdbc/provide-connection> conn (sql/query!> ["SELECT count(*) AS cnt FROM accounts"])))
+            res-tx (fx/run-sync! (fx-jdbc/provide-transaction> conn (sql/query!> ["SELECT count(*) AS cnt FROM accounts"])))]
+        (is (= [{:CNT 2}] res-ds))
+        (is (= [{:CNT 2}] res-conn))
+        (is (= [{:CNT 2}] res-tx)))
+
+      ;; Pipeline
+      (let [res-ds-pipe (fx/run-sync! (-> (sql/query!> ["SELECT count(*) AS cnt FROM accounts"])
+                                          (fx-jdbc/provide-datasource> ds)))
+            res-conn-pipe (fx/run-sync! (-> (sql/query!> ["SELECT count(*) AS cnt FROM accounts"])
+                                            (fx-jdbc/provide-connection> conn)))
+            res-tx-pipe (fx/run-sync! (-> (sql/query!> ["SELECT count(*) AS cnt FROM accounts"])
+                                          (fx-jdbc/provide-transaction> conn)))]
+        (is (= [{:CNT 2}] res-ds-pipe))
+        (is (= [{:CNT 2}] res-conn-pipe))
+        (is (= [{:CNT 2}] res-tx-pipe)))
+
+      (fx/run-sync! (fx-jdbc/close-connection> conn)))))
 
 (deftest test-sql-crud-combinators
   (testing "insert!>, insert-multi!>, query!>, find-by-keys!>, get-by-id!>, update!>, delete!>"
     (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))]
       (fx/run-sync!
         (fx-jdbc/with-connection> ds
-          (fn [_]
-            (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS products"])
-                (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE products (id INT PRIMARY KEY, name VARCHAR(255), category VARCHAR(255), price INT)"])))))))
+          (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS products"])
+              (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE products (id INT PRIMARY KEY, name VARCHAR(255), category VARCHAR(255), price INT)"]))))))
 
       ;; Test insert!> and insert-multi!>
       (fx/run-sync!
@@ -301,50 +367,47 @@
     (let [sqlite-ds (fx/run-sync! (fx-jdbc/get-datasource> sqlite-db-spec))]
       (fx/run-sync!
         (fx-jdbc/with-connection> sqlite-ds
-          (fn [conn]
-            (fx/map>
-              (fn [_]
-                ;; 1. Initialize table and test CRUD
-                (let [init-res (fx/run-sync!
-                                 (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS test_users"])
-                                     (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE test_users (id INTEGER PRIMARY KEY, username TEXT, active INTEGER)"])))
-                                     (fx/mapcat> (fn [_] (sql/insert!> :test_users {:id 1 :username "bob" :active 1})))
-                                     (fx/mapcat> (fn [_] (sql/insert!> :test_users {:id 2 :username "carol" :active 0})))
-                                     (fx/mapcat> (fn [_] (sql/find-by-keys!> :test_users {:active 1} {:builder-fn fx-jdbc/as-unqualified-lower-maps})))
-                                     (fx/provide-service> ::fx-jdbc/datasource conn)))]
-                  (is (= 1 (count init-res)))
-                  (is (= "bob" (:username (first init-res)))))
+          (fx/map>
+            (fn [_]
+              ;; 1. Initialize table and test CRUD
+              (let [init-res (fx/run-sync!
+                               (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS test_users"])
+                                   (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE test_users (id INTEGER PRIMARY KEY, username TEXT, active INTEGER)"])))
+                                   (fx/mapcat> (fn [_] (sql/insert!> :test_users {:id 1 :username "bob" :active 1})))
+                                   (fx/mapcat> (fn [_] (sql/insert!> :test_users {:id 2 :username "carol" :active 0})))
+                                   (fx/mapcat> (fn [_] (sql/find-by-keys!> :test_users {:active 1} {:builder-fn fx-jdbc/as-unqualified-lower-maps})))
+                                   (fx/provide-service> ::fx-jdbc/datasource sqlite-ds)))]
+                (is (= 1 (count init-res)))
+                (is (= "bob" (:username (first init-res)))))
 
-                ;; 2. Transaction commit
-                (let [tx-commit-res (fx/run-sync!
-                                      (-> (fx-jdbc/with-transaction> conn
-                                            (fn [_]
-                                              (sql/insert!> :test_users {:id 3 :username "dave" :active 1})))
-                                          (fx/mapcat> (fn [_]
-                                                        (sql/get-by-id!> :test_users 3 {:builder-fn fx-jdbc/as-unqualified-lower-maps})))
-                                          (fx/provide-service> ::fx-jdbc/datasource conn)))]
-                  (is (= {:id 3 :username "dave" :active 1} tx-commit-res)))
+              ;; 2. Transaction commit
+              (let [tx-commit-res (fx/run-sync!
+                                    (-> (fx-jdbc/with-transaction> sqlite-ds
+                                          (sql/insert!> :test_users {:id 3 :username "dave" :active 1}))
+                                        (fx/mapcat> (fn [_]
+                                                      (sql/get-by-id!> :test_users 3 {:builder-fn fx-jdbc/as-unqualified-lower-maps})))
+                                        (fx/provide-service> ::fx-jdbc/datasource sqlite-ds)))]
+                (is (= {:id 3 :username "dave" :active 1} tx-commit-res)))
 
-                ;; 3. Transaction rollback on IFailure
-                (let [tx-fail-res (fx/run-sync!
-                                    (-> (fx-jdbc/with-transaction> conn
-                                          (fn [_]
-                                            (-> (sql/insert!> :test_users {:id 4 :username "eve" :active 1})
-                                                (fx/mapcat> (fn [_] (fx/fail> :tx/aborted "aborting transaction"))))))
-                                        (fx/provide-service> ::fx-jdbc/datasource conn)))]
-                  (is (fx/failure? tx-fail-res))
-                  (is (= :tx/aborted (fx/tag tx-fail-res))))
+              ;; 3. Transaction rollback on IFailure
+              (let [tx-fail-res (fx/run-sync!
+                                  (-> (fx-jdbc/with-transaction> sqlite-ds
+                                        (-> (sql/insert!> :test_users {:id 4 :username "eve" :active 1})
+                                            (fx/mapcat> (fn [_] (fx/fail> :tx/aborted "aborting transaction")))))
+                                      (fx/provide-service> ::fx-jdbc/datasource sqlite-ds)))]
+                (is (fx/failure? tx-fail-res))
+                (is (= :tx/aborted (fx/tag tx-fail-res))))
 
-                ;; 4. Verify eve was not inserted due to rollback
-                (let [eve (fx/run-sync!
-                            (-> (sql/get-by-id!> :test_users 4 {:builder-fn fx-jdbc/as-unqualified-lower-maps})
-                                (fx/provide-service> ::fx-jdbc/datasource conn)))]
-                  (is (nil? eve))))))))))
+              ;; 4. Verify eve was not inserted due to rollback
+              (let [eve (fx/run-sync!
+                          (-> (sql/get-by-id!> :test_users 4 {:builder-fn fx-jdbc/as-unqualified-lower-maps})
+                              (fx/provide-service> ::fx-jdbc/datasource sqlite-ds)))]
+                (is (nil? eve))))))))))
 
 (deftest test-exception-and-failure-propagation
-  (testing "catch-jdbc macro converts thrown exceptions to IFailure"
-    (let [res1 (fx-jdbc/catch-jdbc (throw (RuntimeException. "Threw directly")))
-          res2 (fx-jdbc/catch-jdbc ["SELECT 1"] (throw (java.sql.SQLException. "SQL boom" "42000" 1234)))]
+  (testing "jdbc-failure constructs typed IFailure records"
+    (let [res1 (fx-jdbc/jdbc-failure (RuntimeException. "Threw directly"))
+          res2 (fx-jdbc/jdbc-failure (java.sql.SQLException. "SQL boom" "42000" 1234) ["SELECT 1"])]
       (is (fx/failure? res1))
       (is (= :jdbc/error (fx/tag res1)))
       (is (= "Threw directly" (:message (fx/error-data res1))))
@@ -370,8 +433,7 @@
   (testing "with-connection> converts acquisition failures into IFailure"
     (let [res (fx/run-sync!
                 (fx-jdbc/with-connection> {:dbtype "invalid-dbtype-does-not-exist"}
-                  (fn [conn]
-                    (fx-jdbc/execute!> conn ["SELECT 1"]))))]
+                  (fx-jdbc/execute!> ["SELECT 1"])))]
       (is (fx/failure? res))
       (is (= :jdbc/error (fx/tag res)))))
 
@@ -381,7 +443,7 @@
       (fx/run-sync! (fx-jdbc/close-connection> conn))
       (let [res (fx/run-sync!
                   (fx-jdbc/with-transaction> conn
-                    (fn [c] (fx-jdbc/execute!> c ["SELECT 1"]))))]
+                    (fx-jdbc/execute!> conn ["SELECT 1"])))]
         (is (fx/failure? res))
         (is (= :jdbc/error (fx/tag res))))))
 

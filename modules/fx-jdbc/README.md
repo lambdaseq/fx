@@ -21,7 +21,7 @@ Requires `fx/core` (`io.github.conjurernix/fx.core`).
 - **Effects as Blueprints**: Database calls are descriptions of queries and transactions represented as immutable data records, executed only at pipeline boundaries via `fx/run-sync!` or `fx/run-async!`.
 - **Automatic Resource Lifecycles**: Connection pools and statements are acquired and closed deterministically via bracket combinators (`acquire-release>`), avoiding connection leaks even under unhandled failures.
 - **Dual-Failure Transaction Rollbacks**: Transactions wrapped in `with-transaction>` automatically roll back if an exception is thrown **or** if any step in the pipeline returns an `IFailure`.
-- **Context-Driven Connection Resolution**: Operations resolve their target connection from an explicit argument, an upstream piped value, or dynamically from `::fx-jdbc/datasource` (`:fx.jdbc/datasource`) in the execution context.
+- **Context-Driven Connection Resolution**: Operations resolve their target connection from an explicit argument, an upstream piped value, or dynamically from `::fx-jdbc/connection` or `::fx-jdbc/datasource` (`:fx.jdbc/connection`, `:fx.jdbc/datasource`) in the execution context.
 - **Structured Failure Payloads**: SQL exceptions are captured as typed `:jdbc/error` failure records containing `:sqlstate`, `:error-code`, `:statement`, and `:cause`.
 
 ---
@@ -43,10 +43,9 @@ Requires `fx/core` (`io.github.conjurernix/fx.core`).
     (fx-jdbc/get-datasource> db-spec)
     (fn [ds]
       (fx-jdbc/with-connection> ds
-        (fn [_conn]
-          (-> (fx-jdbc/execute!> ["CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255), email VARCHAR(255))"])
-              (fx/mapcat> (fn [_] (sql/insert!> :users {:id 1 :name "Alice" :email "alice@example.com"})))
-              (fx/mapcat> (fn [_] (sql/get-by-id!> :users 1 {:builder-fn fx-jdbc/as-unqualified-kebab-maps})))))))
+        (-> (fx-jdbc/execute!> ["CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255), email VARCHAR(255))"])
+            (fx/mapcat> (fn [_] (sql/insert!> :users {:id 1 :name "Alice" :email "alice@example.com"})))
+            (fx/mapcat> (fn [_] (sql/get-by-id!> :users 1 {:builder-fn fx-jdbc/as-unqualified-kebab-maps}))))))
     (fn [_ds]
       (fx/succeed> nil))))
 
@@ -64,15 +63,18 @@ Requires `fx/core` (`io.github.conjurernix/fx.core`).
 | Function | Signature | Description |
 |---|---|---|
 | `get-datasource>` | `[db-spec]` | Creates an effect yielding a `javax.sql.DataSource` from a db-spec map or connection URL string. |
-| `get-connection>` | `([] [connectable] [connectable opts])` | Creates an effect acquiring a `java.sql.Connection` from explicit connectable or context `::fx-jdbc/datasource`. |
+| `get-connection>` | `([] [connectable] [connectable opts])` | Creates an effect acquiring a `java.sql.Connection` from explicit connectable or context `::fx-jdbc/transaction` / `::fx-jdbc/connection` / `::fx-jdbc/datasource`. |
 | `close-connection>` | `[conn]` | Creates an effect safely closing an `AutoCloseable` connection or statement. |
-| `with-connection>` | `([use-eff-fn] [connectable use-eff-fn] [connectable opts use-eff-fn])` | Scopes connection acquisition, binds `::fx-jdbc/datasource` into context, executes `use-eff-fn`, and guarantees close. |
+| `with-connection>` | `([eff] [connectable eff] [connectable opts eff])` | Scopes connection acquisition, binds `::fx-jdbc/connection` and `::fx-jdbc/datasource` into context, executes `eff`, and guarantees close. |
+| `provide-datasource>` | `([ds] [ds eff])` | Binds `::fx-jdbc/datasource` in context for `eff` or pipeline. |
+| `provide-connection>` | `([conn] [conn eff])` | Binds `::fx-jdbc/connection` in context for `eff` or pipeline. |
+| `provide-transaction>` | `([tx] [tx eff])` | Binds `::fx-jdbc/transaction` in context for `eff` or pipeline. |
 
 ### Transactions (`fx.jdbc`)
 
 | Function | Signature | Description |
 |---|---|---|
-| `with-transaction>` | `([tx-eff-fn] [connectable tx-eff-fn] [opts tx-eff-fn] [connectable opts tx-eff-fn])` | Executes `tx-eff-fn` within a transactional boundary. Automatically commits on success and rolls back on exception or `IFailure`. |
+| `with-transaction>` | `([tx-eff] [connectable tx-eff] [opts tx-eff] [connectable opts tx-eff])` | Executes `tx-eff` within a transactional boundary, binding `::fx-jdbc/transaction`, `::fx-jdbc/connection`, and `::fx-jdbc/datasource`. Automatically commits on success and rolls back on exception or `IFailure`. |
 
 #### Transaction Options Map
 
@@ -108,7 +110,7 @@ Re-exported from `next.jdbc.result-set` for passing into `:builder-fn` options:
 
 ### SQL CRUD Combinators (`fx.jdbc.sql`)
 
-High-level helpers wrapping `next.jdbc.sql` that accept an optional leading connectable or resolve `::fx-jdbc/datasource` from the ambient effect context:
+High-level helpers wrapping `next.jdbc.sql` that accept an optional leading connectable or resolve `::fx-jdbc/connection` / `::fx-jdbc/datasource` from the ambient effect context:
 
 | Function | Signature | Description |
 |---|---|---|
@@ -141,7 +143,7 @@ Generated whenever `SQLException` or other database throwables are caught.
 
 ### `:jdbc/missing-connectable`
 
-Generated when a JDBC combinator is called without an explicit connection argument, no connectable was passed upstream in the pipeline, and `::fx-jdbc/datasource` is missing from the effect execution context.
+Generated when a JDBC combinator is called without an explicit connection argument, no connectable was passed upstream in the pipeline, and neither `::fx-jdbc/connection` nor `::fx-jdbc/datasource` is found in the effect execution context.
 
 ```clojure
 {:tag :jdbc/missing-connectable
@@ -154,16 +156,15 @@ Generated when a JDBC combinator is called without an explicit connection argume
 
 ### 1. Connection Scoping & Context Resolution
 
-When executing queries inside `with-connection>`, the acquired connection is automatically injected into the effect context under `::fx-jdbc/datasource` (`:fx.jdbc/datasource`). All nested SQL operations resolve this connection automatically:
+When executing queries inside `with-connection>`, the acquired connection is automatically injected into the effect context under `::fx-jdbc/connection` and `::fx-jdbc/datasource` (`:fx.jdbc/connection`, `:fx.jdbc/datasource`). All nested SQL operations resolve this connection automatically:
 
 ```clojure
 (defn find-active-users []
   (fx-jdbc/with-connection> ds
-    (fn [_conn]
-      (-> (sql/query!> ["SELECT * FROM users WHERE active = ?" true]
-                       {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
-          (fx/map> (fn [users]
-                     (mapv :email users)))))))
+    (-> (sql/query!> ["SELECT * FROM users WHERE active = ?" true]
+                     {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+        (fx/map> (fn [users]
+                   (mapv :email users))))))
 ```
 
 ### 2. Transactional Rollback on Functional Failure
@@ -173,18 +174,17 @@ When executing queries inside `with-connection>`, the acquired connection is aut
 ```clojure
 (defn transfer-funds [from-id to-id amount]
   (fx-jdbc/with-transaction> ds {:isolation :serializable}
-    (fn [_conn]
-      (-> (sql/get-by-id!> :accounts from-id)
-          (fx/mapcat> (fn [sender]
-                        (if (< (:balance sender) amount)
-                          ;; Returning an IFailure triggers automatic rollback
-                          (fx/fail> :transfer/insufficient-funds
-                                    {:sender-id from-id :balance (:balance sender) :required amount})
-                          (-> (sql/update!> :accounts {:balance (- (:balance sender) amount)} {:id from-id})
-                              (fx/mapcat> (fn [_] (sql/get-by-id!> :accounts to-id)))
-                              (fx/mapcat> (fn [receiver]
-                                            (sql/update!> :accounts {:balance (+ (:balance receiver) amount)} {:id to-id})))
-                              (fx/map> (fn [_] {:status :transferred :amount amount}))))))))))
+    (-> (sql/get-by-id!> :accounts from-id)
+        (fx/mapcat> (fn [sender]
+                      (if (< (:balance sender) amount)
+                        ;; Returning an IFailure triggers automatic rollback
+                        (fx/fail> :transfer/insufficient-funds
+                                  {:sender-id from-id :balance (:balance sender) :required amount})
+                        (-> (sql/update!> :accounts {:balance (- (:balance sender) amount)} {:id from-id})
+                            (fx/mapcat> (fn [_] (sql/get-by-id!> :accounts to-id)))
+                            (fx/mapcat> (fn [receiver]
+                                          (sql/update!> :accounts {:balance (+ (:balance receiver) amount)} {:id to-id})))
+                            (fx/map> (fn [_] {:status :transferred :amount amount})))))))))
 ```
 
 ### 3. Memory-Efficient Streaming with `plan!>`

@@ -100,10 +100,10 @@
       (is (fx/effect? q-by-id))
       (is (fx/effect? ins))
       (is (fx/effect? del))
-      (is (= [:map-ctx :map] (fxu/effect-tags q-all)))
-      (is (= [:map-ctx :map] (fxu/effect-tags q-by-id)))
-      (is (= [:map-ctx :mapcat] (fxu/effect-tags ins)))
-      (is (= :map-ctx (fx/tag del)))))
+      (is (= [:try :map] (fxu/effect-tags q-all)))
+      (is (= [:try :map] (fxu/effect-tags q-by-id)))
+      (is (= [:try :mapcat] (fxu/effect-tags ins)))
+      (is (= :try (fx/tag del)))))
 
   (testing "get-datasource> is a pure effect that returns a DataSource"
     (let [ds-eff (db/get-datasource> db/default-db-spec)]

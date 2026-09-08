@@ -92,13 +92,18 @@ example/
 
 ### 1. Run the Server
 
-From the repository root:
+From the `example/` directory via tools.build:
 ```bash
-clojure -M:example -m todo.main
+cd example
+clojure -T:build run
 ```
 
-Or from the `example/` directory:
+Or using Clojure CLI:
 ```bash
+# From repository root
+clojure -M:example -m todo.main
+
+# Or from example directory
 cd example
 clojure -M -m todo.main
 ```
@@ -111,15 +116,20 @@ Todo application server started successfully on http://localhost:3000
 
 ### 2. Run the Test Suite
 
-From the repository root:
-```bash
-clojure -M:example -e "(require 'clojure.test 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test 'todo.schema-test) (let [res (clojure.test/run-tests 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test 'todo.schema-test)] (when (pos? (+ (:fail res) (:error res))) (System/exit 1)))"
-```
-
-Or from the `example/` directory:
+From the `example/` directory via tools.build:
 ```bash
 cd example
-clojure -M:test -e "(require 'clojure.test 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test 'todo.schema-test) (let [res (clojure.test/run-tests 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test 'todo.schema-test)] (when (pos? (+ (:fail res) (:error res))) (System/exit 1)))"
+clojure -T:build test
+```
+
+Or using Clojure CLI:
+```bash
+# From repository root
+clojure -M:dev:test:example -m cognitect.test-runner -d example/test
+
+# Or from example directory
+cd example
+clojure -M:test -m cognitect.test-runner -d test
 ```
 
 ### 3. Interactive HTTP Requests (`test.http`)
@@ -271,6 +281,36 @@ You can interactively develop and test effects from the Clojure REPL:
   ```bash
   curl -X DELETE http://localhost:3000/api/todos/1
   ```
+- **Response (`200 OK`):**
+  ```json
+  {
+    "deleted": true,
+    "id": 1
+  }
+  ```
+
+### 8. Error Responses
+- **Validation Error (`400 Bad Request`):**
+  ```json
+  {
+    "error": "Bad Request",
+    "details": {
+      "message": "Field 'title' is required and must not be blank",
+      "field": "title"
+    }
+  }
+  ```
+- **Not Found Error (`404 Not Found`):**
+  ```json
+  {
+    "error": "Not Found",
+    "details": {
+      "message": "Todo not found with id 999",
+      "id": 999
+    }
+  }
+  ```
+```
 - **Response (`200 OK`):**
   ```json
   {
