@@ -55,14 +55,16 @@
           get-h (routes/get-todo-handler> {:path-params {:id "1"}})
           update-h (routes/update-todo-handler> {:path-params {:id "1"}})
           toggle-h (routes/toggle-todo-handler> {:path-params {:id "1"}})
-          delete-h (routes/delete-todo-handler> {:path-params {:id "1"}})]
+          delete-h (routes/delete-todo-handler> {:path-params {:id "1"}})
+          metrics-h (routes/metrics-handler> {})]
 
       (is (fx/effect? list-h))
       (is (fx/effect? create-h))
       (is (fx/effect? get-h))
       (is (fx/effect? update-h))
       (is (fx/effect? toggle-h))
-      (is (fx/effect? delete-h)))))
+      (is (fx/effect? delete-h))
+      (is (fx/effect? metrics-h)))))
 
 ;; ---------------------------------------------------------------------------
 ;; 3. Direct Execution of Route Effect Handlers with Mock Request Context
@@ -71,6 +73,16 @@
 (deftest test-route-handlers-direct-execution
   (let [ds (fresh-test-ds)
         base-ctx {:fx.jdbc/datasource ds}]
+
+    (testing "metrics-handler> returns 200 with metrics snapshot map"
+      (let [resp (fx/run-sync!
+                   (routes/metrics-handler> {})
+                   base-ctx)]
+        (is (= 200 (:status resp)))
+        (is (map? (:body resp)))
+        (is (contains? (:body resp) :counters))
+        (is (contains? (:body resp) :gauges))
+        (is (contains? (:body resp) :timers))))
 
     (testing "create-todo-handler> processes request body and returns 201 status"
       (let [req {:body-params {:title       "Handler Test Task"

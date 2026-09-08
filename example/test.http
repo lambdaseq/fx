@@ -103,6 +103,23 @@ Accept: application/json
 ###
 
 ### ===========================================================================
+### Observability & Metrics Tests
+### ===========================================================================
+
+### 13. Query In-Memory Metrics Snapshot (GET /api/metrics)
+GET {{host}}/api/metrics
+Accept: application/json
+
+###
+
+### 14. W3C Distributed Tracing with Custom traceparent Header
+GET {{host}}/api/todos
+Accept: application/json
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+
+###
+
+### ===========================================================================
 ### Error Handling & Validation Tests
 ### ===========================================================================
 

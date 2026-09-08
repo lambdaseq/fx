@@ -5,8 +5,7 @@
             [todo.db :as db]
             [todo.domain :as domain]
             [todo.routes :as routes])
-  (:import (java.io ByteArrayInputStream)
-           (java.util UUID)))
+  (:import (java.util UUID)))
 
 (def ^:private m-instance (m/create))
 
@@ -17,7 +16,7 @@
   (let [url (test-db-url)
         ds (db/create-datasource url)
         _ (fx/run-sync! (db/init-db!> ds))
-        app (routes/create-app ds)]
+        app (routes/create-app {:fx.jdbc/datasource ds})]
     {:ds  ds
      :app app}))
 
@@ -44,14 +43,17 @@
 
 (defn- request
   ([app method uri]
-   (request app method uri nil nil))
+   (request app method uri nil nil nil))
   ([app method uri body-params]
-   (request app method uri body-params nil))
+   (request app method uri body-params nil nil))
   ([app method uri body-params query-params]
+   (request app method uri body-params query-params nil))
+  ([app method uri body-params query-params headers]
    (let [req (cond-> {:request-method method
                       :uri            uri
-                      :headers        {"accept"       "application/json"
-                                       "content-type" "application/json"}}
+                      :headers        (merge {"accept"       "application/json"
+                                              "content-type" "application/json"}
+                                             headers)}
                body-params  (assoc :body-params body-params
                                    :body (m/encode m-instance "application/json" body-params))
                query-params (assoc :query-params query-params
@@ -199,3 +201,55 @@
         (let [not-found (fx/run-sync! (domain/get-todo-by-id> (:id created)) ctx)]
           (is (fx/failure? not-found))
           (is (= :todo/not-found (fx/tag not-found))))))))
+
+(deftest test-observability-endpoints-and-headers
+  (let [{:keys [app]} (setup-test-app)]
+    (testing "GET /api/metrics returns 200 with structured metrics map"
+      (let [resp (request app :get "/api/metrics")]
+        (is (= 200 (:status resp)))
+        (is (map? (:body resp)))
+        (is (contains? (:body resp) :counters))
+        (is (contains? (:body resp) :gauges))
+        (is (contains? (:body resp) :timers))))
+
+    (testing "W3C traceparent header propagation with incoming custom traceparent"
+      (let [custom-tp "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+            resp (request app :get "/api/todos" nil nil {"traceparent" custom-tp})
+            resp-tp (get-in resp [:headers "traceparent"])]
+        (is (= 200 (:status resp)))
+        (is (some? resp-tp))
+        (is (re-find #"^00-4bf92f3577b34da6a3ce929d0e0e4736-[0-9a-f]{16}-01$" resp-tp))))
+
+    (testing "W3C traceparent header generated automatically when omitted"
+      (let [resp (request app :get "/api/todos")
+            resp-tp (get-in resp [:headers "traceparent"])]
+        (is (= 200 (:status resp)))
+        (is (some? resp-tp))
+        (is (re-find #"^00-[0-9a-f]{32}-[0-9a-f]{16}-01$" resp-tp))))))
+
+(deftest test-metrics-accumulation
+  (let [{:keys [app]} (setup-test-app)]
+    (testing "CRUD operations accumulate counters and timers in metrics snapshot"
+      (let [c-resp (request app :post "/api/todos" {:title "Tracked Todo" :description "Measuring metrics"})
+            todo-id (get-in c-resp [:body :id])
+            _ (request app :get (str "/api/todos/" todo-id))
+            _ (request app :delete (str "/api/todos/" todo-id))
+            m-resp (request app :get "/api/metrics")
+            metrics-data (:body m-resp)
+            counters (:counters metrics-data)
+            timers (:timers metrics-data)
+            get-counter (fn [k] (or (get-in counters [k :value])
+                                   (get-in counters [(keyword k) :value])
+                                   (get-in counters [(name k) :value])
+                                   0))
+            get-timer-count (fn [k] (or (get-in timers [k :count])
+                                       (get-in timers [(keyword k) :count])
+                                       (get-in timers [(name k) :count])
+                                       0))]
+
+        (is (= 200 (:status m-resp)))
+        (is (>= (get-counter :todo.created.total) 1))
+        (is (>= (get-counter :todo.deleted.total) 1))
+        (is (>= (get-counter :http.server.requests.total) 1))
+        (is (>= (get-timer-count :http.server.requests.duration) 3))
+        (is (pos? (get-timer-count :db.query.duration)))))))

@@ -5,6 +5,7 @@ A full-stack functional Clojure REST API demonstrating how to build web services
 - **[fx.core](https://github.com/conjurernix/fx)**: Pure effect pipelines, typed failure channels (`IFailure`), and continuation stack runtime.
 - **[fx.jdbc](https://github.com/conjurernix/fx)**: Ambient database connection management and transaction handling.
 - **[fx.ring](https://github.com/conjurernix/fx)**: Declarative Ring HTTP handler wrapping (`wrap-fx`), ambient context injection, and structured failure translation.
+- **[fx.observability](https://github.com/conjurernix/fx)**: Zero-dependency contextual structured logging (`fx.observability.log`), distributed tracing & W3C context propagation (`fx.observability.trace`), and concurrent in-memory metrics (`fx.observability.metrics`).
 - **[HoneySQL v2](https://github.com/seancorfield/honeysql)**: Data-driven SQL generation.
 - **[Reitit](https://github.com/metosin/reitit)**: Declarative, data-driven HTTP routing.
 - **[Muuntaja](https://github.com/metosin/muuntaja)**: Content negotiation and automated JSON encoding/decoding.
@@ -293,37 +294,43 @@ You can interactively develop and test effects and system layers from the Clojur
   }
   ```
 
-### 8. Error Responses
-- **Validation Error (`400 Bad Request`):**
-  ```json
-  {
-    "error": "Bad Request",
-    "details": {
-      "message": "Field 'title' is required and must not be blank",
-      "field": "title"
-    }
-  }
+### 8. Query Metrics
+- **Endpoint:** `GET /api/metrics`
+- **Request:**
+  ```bash
+  curl http://localhost:3000/api/metrics
   ```
-- **Not Found Error (`404 Not Found`):**
-  ```json
-  {
-    "error": "Not Found",
-    "details": {
-      "message": "Todo not found with id 999",
-      "id": 999
-    }
-  }
-  ```
-```
 - **Response (`200 OK`):**
   ```json
   {
-    "deleted": true,
-    "id": 1
+    "counters": {
+      "http.server.requests.total": {"tags": {"method": "GET"}, "value": 42},
+      "todo.created.total": {"tags": {}, "value": 5},
+      "todo.deleted.total": {"tags": {}, "value": 1}
+    },
+    "gauges": {},
+    "timers": {
+      "http.server.requests.duration": {
+        "tags": {},
+        "count": 42,
+        "sum-ms": 128.4,
+        "min-ms": 0.8,
+        "max-ms": 14.2,
+        "avg-ms": 3.05
+      },
+      "db.query.duration": {
+        "tags": {"operation": "query-todos"},
+        "count": 15,
+        "sum-ms": 22.5,
+        "min-ms": 0.5,
+        "max-ms": 4.1,
+        "avg-ms": 1.5
+      }
+    }
   }
   ```
 
-### 8. Error Responses
+### 9. Error Responses
 - **Validation Error (`400 Bad Request`):**
   ```json
   {
@@ -344,3 +351,20 @@ You can interactively develop and test effects and system layers from the Clojur
     }
   }
   ```
+
+---
+
+## Observability & Distributed Tracing
+
+The example application leverages the **`fx.observability`** subsystem to provide zero-dependency production observability:
+
+### 1. Contextual Structured Logging (`fx.observability.log`)
+HTTP requests automatically populate log annotations with `:request-id`, `:method`, and `:uri`. Domain workflows and system startup/shutdown log structured entries containing timestamps, active trace IDs, span IDs, and contextual metadata without passing logger objects through functions.
+
+### 2. Distributed Tracing & W3C Context (`fx.observability.trace`)
+- Incoming requests with a W3C `traceparent` header (e.g., `00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`) automatically propagate their `trace-id` throughout all downstream domain workflows (`todo.create`, `todo.update`, `todo.delete`) and database queries (`db.query-todos`, `db.insert-todo`).
+- If omitted, a valid 32-character hex trace ID is generated automatically.
+- All HTTP responses include an outgoing `traceparent` header to correlate frontend requests with backend traces.
+
+### 3. In-Memory Metrics (`fx.observability.metrics`)
+Concurrent, lock-free metrics (`LongAdder`, `DoubleAdder`) record request throughput, latencies, and domain entity counters without external dependencies. The current state is queryable at `GET /api/metrics`.

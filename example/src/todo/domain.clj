@@ -1,5 +1,8 @@
 (ns todo.domain
   (:require [fx.core :as fx]
+            [fx.observability.log :as log]
+            [fx.observability.metrics :as metrics]
+            [fx.observability.trace :as trace]
             [todo.db :as db]
             [todo.schema :as schema])
   (:import (java.time Instant)))
@@ -25,72 +28,85 @@
 (defn list-todos>
   "Retrieves all todos, optionally filtered by `:completed` boolean."
   ([]
-   (db/query-todos>))
+   (list-todos> nil))
   ([completed-filter]
-   (db/query-todos> completed-filter)))
+   (trace/with-span> "todo.list" {:completed-filter completed-filter}
+     (db/query-todos> completed-filter))))
 
 (defn get-todo-by-id>
   "Retrieves a single todo by `id`.
    Fails with `:todo/not-found` if no matching record exists."
   [id]
-  (-> (db/query-todo-by-id> id)
-      (fx/mapcat> (fn [todo]
-                    (if (nil? todo)
-                      (fx/fail> :todo/not-found {:message (str "Todo not found with id " id)
-                                                 :id      id})
-                      (fx/succeed> todo))))))
+  (trace/with-span> "todo.get" {:id id}
+    (-> (db/query-todo-by-id> id)
+        (fx/mapcat> (fn [todo]
+                      (if (nil? todo)
+                        (-> (log/log-warn> (str "Todo not found with id " id) {:id id})
+                            (fx/chain> (fx/fail> :todo/not-found {:message (str "Todo not found with id " id)
+                                                                  :id      id})))
+                        (fx/succeed> todo)))))))
 
 (defn create-todo>
   "Validates input payload and inserts a new todo with timestamps.
    Fails with `:todo/invalid-input` if payload validation fails."
   [payload]
-  (-> (validate-create-payload> payload)
-      (fx/mapcat> (fn [{:keys [title description completed]}]
-                    (let [now (str (Instant/now))
-                          record {:title       title
-                                  :description description
-                                  :completed   (boolean completed)
-                                  :created-at  now
-                                  :updated-at  now}]
-                      (db/insert-todo!> record))))))
+  (trace/with-span> "todo.create" {:title (:title payload)}
+    (->> (-> (validate-create-payload> payload)
+             (fx/mapcat> (fn [{:keys [title description completed]}]
+                           (let [now (str (Instant/now))
+                                 record {:title       title
+                                         :description description
+                                         :completed   (boolean completed)
+                                         :created-at  now
+                                         :updated-at  now}]
+                             (-> (db/insert-todo!> record)
+                                 (log/log-info> "Todo created" {:title title}))))))
+         (metrics/track-success-count> (metrics/metric-counter "todo.created.total")))))
 
 (defn update-todo>
   "Validates update payload, verifies existence, and updates todo fields.
    Fails with `:todo/invalid-input` or `:todo/not-found`."
   [id payload]
-  (-> (validate-update-payload> payload)
-      (fx/mapcat> (fn [valid-payload]
-                    (-> (get-todo-by-id> id)
-                        (fx/mapcat> (fn [_existing]
-                                      (let [now (str (Instant/now))
-                                            updates (cond-> {:updated-at now}
-                                                      (contains? valid-payload :title)
-                                                      (assoc :title (:title valid-payload))
+  (trace/with-span> "todo.update" {:id id}
+    (-> (validate-update-payload> payload)
+        (fx/mapcat> (fn [valid-payload]
+                      (-> (get-todo-by-id> id)
+                          (fx/mapcat> (fn [_existing]
+                                        (let [now (str (Instant/now))
+                                              updates (cond-> {:updated-at now}
+                                                        (contains? valid-payload :title)
+                                                        (assoc :title (:title valid-payload))
 
-                                                      (contains? valid-payload :description)
-                                                      (assoc :description (:description valid-payload))
+                                                        (contains? valid-payload :description)
+                                                        (assoc :description (:description valid-payload))
 
-                                                      (contains? valid-payload :completed)
-                                                      (assoc :completed (:completed valid-payload)))]
-                                        (db/update-todo!> id updates)))))))))
+                                                        (contains? valid-payload :completed)
+                                                        (assoc :completed (:completed valid-payload)))]
+                                          (-> (db/update-todo!> id updates)
+                                              (log/log-info> "Todo updated" {:id id})))))))))))
 
 (defn toggle-todo>
   "Flips the `:completed` boolean of an existing todo.
    Fails with `:todo/not-found` if the todo does not exist."
   [id]
-  (-> (get-todo-by-id> id)
-      (fx/mapcat> (fn [_existing]
-                    (let [now (str (Instant/now))]
-                      (db/toggle-todo!> id now))))))
+  (trace/with-span> "todo.toggle" {:id id}
+    (-> (get-todo-by-id> id)
+        (fx/mapcat> (fn [_existing]
+                      (let [now (str (Instant/now))]
+                        (-> (db/toggle-todo!> id now)
+                            (log/log-info> "Todo toggled" {:id id}))))))))
 
 (defn delete-todo>
   "Deletes an existing todo by `id`.
    Fails with `:todo/not-found` if the todo does not exist.
    Returns `{:deleted true, :id id}` on success."
   [id]
-  (-> (get-todo-by-id> id)
-      (fx/mapcat> (fn [_existing]
-                    (-> (db/delete-todo!> id)
-                        (fx/map> (fn [_]
-                                   {:deleted true
-                                    :id      id})))))))
+  (trace/with-span> "todo.delete" {:id id}
+    (->> (-> (get-todo-by-id> id)
+             (fx/mapcat> (fn [_existing]
+                           (-> (db/delete-todo!> id)
+                               (fx/map> (fn [_]
+                                          {:deleted true
+                                           :id      id}))
+                               (log/log-info> "Todo deleted" {:id id})))))
+         (metrics/track-success-count> (metrics/metric-counter "todo.deleted.total")))))

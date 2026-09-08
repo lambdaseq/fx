@@ -13,6 +13,7 @@ A lightweight, purely functional, and modular effect system for Clojure and Cloj
 | Module | Coordinate | Description | Documentation |
 |---|---|---|---|
 | **[`fx.core`](modules/fx-core)** | `io.github.conjurernix/fx.core` | Foundational effect runtime, AST records, standard combinators, failure channels, context DI, composable lifecycle layers (`fx.layer`), and metaprogramming (`fx.utils`). | [Read Core Docs →](modules/fx-core/README.md) |
+| **[`fx.observability`](modules/fx-observability)** | `io.github.conjurernix/fx.observability` | Zero-dependency contextual structured logging (`fx.observability.log`), distributed tracing spans & W3C headers (`fx.observability.trace`), concurrent in-memory metrics (`fx.observability.metrics`), typed Cause failure diagnostics (`fx.observability.diagnostics`), and telemetry event taps (`fx.observability.telemetry`). | [Read Observability Docs →](modules/fx-observability/README.md) |
 | **[`fx.typed`](modules/fx-typed)** | `io.github.conjurernix/fx.typed` | Typed Clojure annotations with full variance tracking across input, output, failure, and context channels. | [Read Typed Docs →](modules/fx-typed/README.md) |
 | **[`fx.jdbc`](modules/fx-jdbc)** | `io.github.conjurernix/fx.jdbc` | Functional JDBC database access and connection pooling with automatic dual-failure transaction rollback semantics. | [Read JDBC Docs →](modules/fx-jdbc/README.md) |
 | **[`fx.ring`](modules/fx-ring)** | `io.github.conjurernix/fx.ring` | Ring HTTP middleware and response combinators for 1-arity synchronous and 3-arity asynchronous web handlers. | [Read Ring Docs →](modules/fx-ring/README.md) |
@@ -153,6 +154,31 @@ The core module provides the primitives to build, compose, and execute pure effe
 
 ---
 
+### 5. `fx.observability` — Contextual Observability, Tracing & Metrics
+
+`fx.observability` provides zero-dependency structured logging, distributed tracing spans with W3C `traceparent` headers, concurrent in-memory metrics, typed Cause algebra diagnostics, and telemetry taps.
+
+```clojure
+(ns example.observability
+  (:require [fx.core :as fx]
+            [fx.observability.log :as log]
+            [fx.observability.metrics :as metrics]
+            [fx.observability.trace :as trace]))
+
+(defn handle-order [order]
+  (-> (log/annotate-logs> {:order-id (:id order)})
+      (trace/with-span> "orders.process"
+        (-> (fx/succeed> order)
+            (log/log-info> "Order received")
+            (metrics/track-duration> (metrics/metric-timer "order.latency")
+              (metrics/track-success-count> (metrics/metric-counter "order.success")
+                (process-order> order)))))))
+```
+
+👉 **[Detailed `fx.observability` Documentation & API Reference →](modules/fx-observability/README.md)**
+
+---
+
 ## Installation
 
 Add the necessary modules to your `deps.edn`:
@@ -160,16 +186,19 @@ Add the necessary modules to your `deps.edn`:
 ```clojure
 {:deps
  {;; Foundational effect system
-  io.github.conjurernix/fx.core  {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.core          {:mvn/version "0.0.1-alpha"}
+
+  ;; Zero-dependency observability (logging, tracing, metrics, diagnostics)
+  io.github.conjurernix/fx.observability   {:mvn/version "0.0.1-alpha"}
 
   ;; Optional Typed Clojure support
-  io.github.conjurernix/fx.typed {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.typed         {:mvn/version "0.0.1-alpha"}
 
   ;; Optional JDBC database support
-  io.github.conjurernix/fx.jdbc  {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.jdbc          {:mvn/version "0.0.1-alpha"}
 
   ;; Optional Ring HTTP support
-  io.github.conjurernix/fx.ring  {:mvn/version "0.0.1-alpha"}}}
+  io.github.conjurernix/fx.ring          {:mvn/version "0.0.1-alpha"}}}
 ```
 
 ---

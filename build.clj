@@ -6,22 +6,24 @@
             [deps-deploy.deps-deploy :as dd]))
 
 (def lib-modules
-  {:core  {:lib 'io.github.conjurernix/fx.core  :dir "modules/fx-core"  :description "Declarative, purely functional effect system for Clojure and ClojureScript"}
-   :typed {:lib 'io.github.conjurernix/fx.typed :dir "modules/fx-typed" :description "Typed Clojure annotations for fx effect system"}
-   :jdbc  {:lib 'io.github.conjurernix/fx.jdbc  :dir "modules/fx-jdbc"  :description "Effectful, purely functional JDBC database access for fx"}
-   :ring  {:lib 'io.github.conjurernix/fx.ring  :dir "modules/fx-ring"  :description "Ring HTTP middleware and response combinators for fx"}})
+  {:core          {:lib 'io.github.conjurernix/fx.core          :dir "modules/fx-core"          :description "Declarative, purely functional effect system for Clojure and ClojureScript"}
+   :typed         {:lib 'io.github.conjurernix/fx.typed         :dir "modules/fx-typed"         :description "Typed Clojure annotations for fx effect system"}
+   :jdbc          {:lib 'io.github.conjurernix/fx.jdbc          :dir "modules/fx-jdbc"          :description "Effectful, purely functional JDBC database access for fx"}
+   :ring          {:lib 'io.github.conjurernix/fx.ring          :dir "modules/fx-ring"          :description "Ring HTTP middleware and response combinators for fx"}
+   :observability {:lib 'io.github.conjurernix/fx.observability :dir "modules/fx-observability" :description "Structured logging, distributed tracing, in-memory metrics, and diagnostics for fx"}})
 
 (def default-all-modules
-  ["modules/fx-core" "modules/fx-typed" "modules/fx-jdbc" "modules/fx-ring"])
+  ["modules/fx-core" "modules/fx-typed" "modules/fx-jdbc" "modules/fx-ring" "modules/fx-observability"])
 
 (def internal-libs
   (into #{} (map :lib (vals lib-modules))))
 
 (def local->mvn-internal
-  {'fx/core  'io.github.conjurernix/fx.core
-   'fx/typed 'io.github.conjurernix/fx.typed
-   'fx/jdbc  'io.github.conjurernix/fx.jdbc
-   'fx/ring  'io.github.conjurernix/fx.ring})
+  {'fx/core          'io.github.conjurernix/fx.core
+   'fx/typed         'io.github.conjurernix/fx.typed
+   'fx/jdbc          'io.github.conjurernix/fx.jdbc
+   'fx/ring          'io.github.conjurernix/fx.ring
+   'fx/observability 'io.github.conjurernix/fx.observability})
 
 (defn compute-version
   "Derives version from options or git tags.
@@ -129,7 +131,8 @@
                                "-d" "modules/fx-core/test"
                                "-d" "modules/fx-typed/test"
                                "-d" "modules/fx-jdbc/test"
-                               "-d" "modules/fx-ring/test"]})
+                               "-d" "modules/fx-ring/test"
+                               "-d" "modules/fx-observability/test"]})
         {:keys [exit]} (b/process cmds)]
     (when-not (zero? exit)
       (throw (ex-info "Tests failed" {:exit exit}))))
@@ -286,6 +289,7 @@
                "modules/fx-typed/deps.edn"
                "modules/fx-jdbc/deps.edn"
                "modules/fx-ring/deps.edn"
+               "modules/fx-observability/deps.edn"
                "deps.edn"]]
     (doseq [f-path files]
       (let [f (io/file f-path)]
@@ -294,7 +298,7 @@
                 updated (-> content
                             (str/replace #"(io\.github\.conjurernix/fx\.[a-z]+)(\s+\{:mvn/version\s+\")[^\"]+(\"\})"
                                          (str "$1$2" new-version "$3"))
-                            (str/replace #"(fx/(?:core|typed|jdbc|ring))(\s+\{:mvn/version\s+\")[^\"]+(\"\})"
+                            (str/replace #"(fx/(?:core|typed|jdbc|ring|observability))(\s+\{:mvn/version\s+\")[^\"]+(\"\})"
                                          (str "$1$2" new-version "$3")))]
             (if (not= content updated)
               (do

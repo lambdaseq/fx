@@ -91,9 +91,9 @@
   (testing "throws assertion error when non-function passed to wrap-fx"
     (is (thrown? AssertionError (fx-ring/wrap-fx (fx/succeed> {:status 200})))))
 
-  (testing "throws assertion error when handler does not return an effect"
-    (let [app (fx-ring/wrap-fx (fn [_] {:status 200}))]
-      (is (thrown? AssertionError (app {:uri "/test"}))))))
+  (testing "passes through non-effect response maps safely"
+    (let [app (fx-ring/wrap-fx (fn [_] {:status 200 :body "raw"}))]
+      (is (= {:status 200 :body "raw"} (app {:uri "/test"}))))))
 
 (deftest test-wrap-fx-async
   (testing "evaluates effect handler in 3-arity async context"
@@ -116,7 +116,7 @@
   (testing "propagates failure in async 3-arity handler"
     (let [handler (fn [_req]
                     (fx/fail> :auth/unauthorized {:status 401 :message "Unauthorized"}))
-          app (fx-ring/wrap-fx handler)
+          app (-> handler (fx-ring/wrap-fx) (fx-ring/wrap-fx-failures))
           latch (CountDownLatch. 1)
           result-atom (atom nil)]
       (app {:uri "/protected"}
@@ -131,24 +131,27 @@
       (is (= {:message "Unauthorized"} (:body @result-atom))))))
 
 (deftest test-wrap-fx-failures
+  (testing "wrap-fx-failure is identical to wrap-fx-failures"
+    (is (identical? fx-ring/wrap-fx-failures fx-ring/wrap-fx-failure)))
+
   (testing "hybrid failure resolution with explicit failure-map tag match"
     (let [handler (fn [_req] (fx/fail> :not-found {:id 42}))
           opts {:failure-map {:not-found (fn [err req]
                                            {:status 404 :body (str "Item " (:id err) " missing at " (:uri req))})}}
-          app (fx-ring/wrap-fx handler opts)
+          app (-> handler (fx-ring/wrap-fx-runner) (fx-ring/wrap-fx-failures opts))
           res (app {:uri "/items/42"})]
       (is (= {:status 404 :body "Item 42 missing at /items/42"} res))))
 
   (testing "hybrid failure resolution deriving status code from error-data"
     (let [handler (fn [_req] (fx/fail> :auth/invalid-token {:status 401 :message "Expired token"}))
-          app (fx-ring/wrap-fx handler)
+          app (-> handler (fx-ring/wrap-fx-runner) (fx-ring/wrap-fx-failures))
           res (app {:uri "/protected"})]
       (is (= 401 (:status res)))
       (is (= {:message "Expired token"} (:body res)))))
 
   (testing "hybrid failure resolution fallback to default 500 handler"
     (let [handler (fn [_req] (fx/fail> :db/timeout {:message "DB query timeout"}))
-          app (fx-ring/wrap-fx handler)
+          app (-> handler (fx-ring/wrap-fx-runner) (fx-ring/wrap-fx-failures))
           res (app {:uri "/db"})]
       (is (= 500 (:status res)))
       (is (= "DB query timeout" (:body res)))))
@@ -157,7 +160,7 @@
     (let [handler (fn [_req] (fx/fail> :custom/unhandled "Raw error message"))
           opts {:default-handler (fn [failure req]
                                    {:status 500 :body {:error (fx/tag failure) :path (:uri req)}})}
-          app (fx-ring/wrap-fx handler opts)
+          app (-> handler (fx-ring/wrap-fx-runner) (fx-ring/wrap-fx-failures opts))
           res (app {:uri "/custom"})]
       (is (= {:status 500 :body {:error :custom/unhandled :path "/custom"}} res)))))
 
@@ -303,3 +306,19 @@
         (is (= {:status 200 :headers {} :body {:id 1 :name "Widget"}} item-res))
         (is (= 404 (:status missing-res)))
         (is (= {:message "Item 99 not found"} (:body missing-res)))))))
+
+(deftest test-wrap-fx-all
+  (testing "wrap-fx-all composes context injection, failure mapping, and effect execution"
+    (let [handler (fn [req]
+                    (if (= (:uri req) "/error")
+                      (fx/fail> :test/failure {:custom "fail-detail"})
+                      (-> (fx/service> :message)
+                          (fx/map> (fn [msg] {:status 200 :body {:msg msg :user (get-in req [:params :user])}})))))
+          failure-map {:test/failure (fn [err req]
+                                       {:status 422 :body {:error "Custom Failure" :details (:custom err) :path (:uri req)}})}
+          app (fx-ring/wrap-fx-all handler {:context {:message "Hello from context"}
+                                            :failure-map failure-map})
+          ok-res (app {:uri "/ok" :params {:user "alice"}})
+          err-res (app {:uri "/error"})]
+      (is (= {:status 200 :body {:msg "Hello from context" :user "alice"}} ok-res))
+      (is (= {:status 422 :body {:error "Custom Failure" :details "fail-detail" :path "/error"}} err-res)))))

@@ -91,7 +91,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-db-effect-ast-inspection
-  (testing "db query effects are valid Effect AST records before execution"
+  (testing "db query effects are valid Effect AST records with tracing spans before execution"
     (let [q-all (db/query-todos>)
           q-by-id (db/query-todo-by-id> 1)
           ins (db/insert-todo!> {:title "Test" :completed false})
@@ -100,10 +100,10 @@
       (is (fx/effect? q-by-id))
       (is (fx/effect? ins))
       (is (fx/effect? del))
-      (is (= [:try :map] (fxu/effect-tags q-all)))
-      (is (= [:try :map] (fxu/effect-tags q-by-id)))
-      (is (= [:try :mapcat] (fxu/effect-tags ins)))
-      (is (= :try (fx/tag del)))))
+      (is (= [:with-span] (fxu/effect-tags q-all)))
+      (is (= [:with-span] (fxu/effect-tags q-by-id)))
+      (is (= [:with-span] (fxu/effect-tags ins)))
+      (is (= :with-span (fx/tag del)))))
 
   (testing "get-datasource> is a pure effect that returns a DataSource"
     (let [ds-eff (db/get-datasource> db/default-db-spec)]

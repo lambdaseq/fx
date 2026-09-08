@@ -113,9 +113,46 @@
         (catch Throwable t
           (raise t)))))))
 
-(defn wrap-fx
-  "Converts an effect handler function (fn [req] -> effect) into a standard Ring HTTP handler.
+(def wrap-fx-failure
+  "Alias for `wrap-fx-failures`."
+  wrap-fx-failures)
+
+(defn wrap-fx-runner
+  "Evaluates effect handler functions (fn [req] -> effect) into Ring values (maps or IFailure).
    Supports 1-arity synchronous (fn [req]) and 3-arity asynchronous (fn [req respond raise]).
+   If the handler returns a non-effect value (e.g. standard Ring response map), it passes through unchanged."
+  ([handler]
+   (wrap-fx-runner handler nil))
+  ([handler opts]
+   (assert (ifn? handler) "wrap-fx-runner expects a handler function (fn [req])")
+   (fn
+     ([req]
+      (let [res (handler req)]
+        (if (fx/effect? res)
+          (let [ctx (build-fx-context req opts)]
+            (fx/run-sync! res ctx))
+          res)))
+     ([req respond raise]
+      (try
+        (let [res (handler req)]
+          (if (fx/effect? res)
+            (let [ctx (build-fx-context req opts)
+                  ^CompletableFuture cf (fx/run-async! res ctx)]
+              (.whenComplete cf
+                (reify BiConsumer
+                  (accept [_ val err]
+                    (if err
+                      (raise err)
+                      (respond val))))))
+            (respond res)))
+        (catch Throwable t
+          (raise t)))))))
+
+(defn wrap-fx
+  "Converts an effect handler function (fn [req] -> effect) into a standard Ring HTTP handler
+   with automatic failure-to-response translation.
+   Supports 1-arity synchronous (fn [req]) and 3-arity asynchronous (fn [req respond raise]).
+   If the handler returns a non-effect value (e.g. standard Ring response map), it passes through unchanged.
 
    Options:
      :provider        - Map or (fn [req]) providing external dependencies / services
@@ -126,25 +163,24 @@
   ([handler]
    (wrap-fx handler nil))
   ([handler opts]
-   (assert (ifn? handler) "wrap-fx expects a handler function (fn [req])")
-   (fn
-     ([req]
-      (let [effect (handler req)]
-        (assert (fx/effect? effect) "handler must return an IEffect instance")
-        (let [ctx (build-fx-context req opts)
-              res (fx/run-sync! effect ctx)]
-          (resolve-failure-to-response res req opts))))
-     ([req respond raise]
-      (try
-        (let [effect (handler req)]
-          (assert (fx/effect? effect) "handler must return an IEffect instance")
-          (let [ctx (build-fx-context req opts)
-                ^CompletableFuture cf (fx/run-async! effect ctx)]
-            (.whenComplete cf
-              (reify BiConsumer
-                (accept [_ val err]
-                  (if err
-                    (raise err)
-                    (respond (resolve-failure-to-response val req opts))))))))
-        (catch Throwable t
-          (raise t)))))))
+   (wrap-fx-failures (wrap-fx-runner handler opts) opts)))
+
+(defn wrap-fx-all
+  "Composite Ring middleware combining `wrap-fx-context`, `wrap-fx-failures`, and `wrap-fx-runner`.
+
+   Options:
+     :context         - Base context map or (fn [req]) provider
+     :provider        - Alias for :context
+     :services        - Alias for :context
+     :failure-map     - Map of failure tags to handler functions
+     :default-handler - Fallback failure handler function"
+  ([handler]
+   (wrap-fx-all handler nil))
+  ([handler opts]
+   (let [ctx (or (:context opts) (:provider opts) (:services opts) {})]
+     (-> handler
+         (wrap-fx-runner opts)
+         (wrap-fx-failures opts)
+         (wrap-fx-context ctx))))
+  ([handler context opts]
+   (wrap-fx-all handler (assoc (or opts {}) :context context))))

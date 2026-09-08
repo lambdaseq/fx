@@ -35,6 +35,14 @@
             </ModuleState>
           </value>
         </entry>
+        <entry key="fx-observability">
+          <value>
+            <ModuleState>
+              <option name="buildSystemId" value="CLOJURE_DEPS" />
+              <option name="displayName" value="fx-observability" />
+            </ModuleState>
+          </value>
+        </entry>
         <entry key="fx-ring">
           <value>
             <ModuleState>

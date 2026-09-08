@@ -288,3 +288,29 @@ When a layer is evaluated via `provide-layer>`, `with-layer>`, or managed via `s
 1. Resources are acquired in sequence.
 2. If any stage during layer acquisition fails, already-acquired resources in the scope are immediately finalized in reverse acquisition order before the failure returns.
 3. Upon pipeline completion, normal exit, or unhandled exceptions, all registered finalizers are executed deterministically.
+
+---
+
+## 9. Observability, Distributed Tracing & Diagnostics (`fx.observability`)
+
+The `modules/fx-observability` module introduces zero-dependency contextual logging, distributed tracing, high-concurrency in-memory metrics, typed failure diagnostics, and telemetry taps built directly on top of `fx`'s immutable context map.
+
+### Context-Driven Observability State
+
+Because `fx` passes context immutably across continuation steps (`-step` and `-resume`), observability state does not rely on global singletons or JVM `ThreadLocal` storage:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          fx Execution Context                           │
+│  {:fx.observability/log-annotations {:user-id "123", :request-id "abc"} │
+│   :fx.observability/trace-spans     [{:name "http.req", :span-id "00f1"}]│
+│   :fx.observability/metrics-registry (ConcurrentMetricsRegistry)        │
+│   :fx.observability/logger          console-logger-sink                 │
+│   :fx.observability/span-reporter   (fn [span] ...) }                   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **Contextual Logging (`fx.observability.log`):** `annotate-logs>` injects key-value pairs into `:fx.observability/log-annotations` which downstream steps automatically inherit.
+2. **Distributed Tracing (`fx.observability.trace`):** `with-span>` pushes span frames onto `:fx.observability/trace-spans` and records nanosecond elapsed durations and parent-child hierarchies with W3C `traceparent` codec support (`extract-trace-context>`, `inject-trace-context>`).
+3. **In-Memory Metrics (`fx.observability.metrics`):** Lock-free atomic counters (`LongAdder`), gauges, and timers track latency distributions and request throughput with `metrics-snapshot!` queries.
+4. **Diagnostics & Cause Algebra (`fx.observability.diagnostics`):** `sandbox>` wraps domain failures (`Fail`) and unexpected JVM defects (`Die`) into a typed `Cause` tree on the success channel, enabling full programmatic inspection and visual ASCII rendering (`render-cause`, `render-execution-trace`).

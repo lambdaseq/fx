@@ -1,6 +1,8 @@
 (ns todo.db
   (:require [fx.core :as fx]
             [fx.jdbc :as fx-jdbc]
+            [fx.observability.metrics :as metrics]
+            [fx.observability.trace :as trace]
             [honey.sql :as sql]
             [next.jdbc :as jdbc])
   (:import (javax.sql DataSource)
@@ -146,48 +148,60 @@
   ([]
    (query-todos> nil))
   ([completed-filter]
-   (-> (fx-jdbc/execute!> (sql/format (sql-select-all completed-filter))
-                          {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
-       (fx/map> (fn [rows] (mapv row->todo rows))))))
+   (trace/with-span> "db.query-todos" {:completed-filter completed-filter}
+     (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "query-todos"})
+       (-> (fx-jdbc/execute!> (sql/format (sql-select-all completed-filter))
+                              {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+           (fx/map> (fn [rows] (mapv row->todo rows))))))))
 
 (defn query-todo-by-id>
   "Queries a single todo by primary key `id`."
   [id]
-  (-> (fx-jdbc/execute-one!> (sql/format (sql-select-by-id id))
-                             {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
-      (fx/map> row->todo)))
+  (trace/with-span> "db.query-by-id" {:id id}
+    (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "query-by-id"})
+      (-> (fx-jdbc/execute-one!> (sql/format (sql-select-by-id id))
+                                 {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+          (fx/map> row->todo)))))
 
 (defn insert-todo!>
   "Inserts a new todo record and returns the created todo entity map."
   [todo-map]
-  (-> (fx-jdbc/execute-one!> (sql/format (sql-insert-todo todo-map))
-                             {:return-keys true
-                              :builder-fn  fx-jdbc/as-unqualified-kebab-maps})
-      (fx/mapcat> (fn [res]
-                    (let [id (or (:id res)
-                                 (:last-insert-rowid res)
-                                 (get res (keyword "last-insert-rowid()"))
-                                 (first (vals res)))]
-                      (query-todo-by-id> id))))))
+  (trace/with-span> "db.insert-todo"
+    (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "insert-todo"})
+      (-> (fx-jdbc/execute-one!> (sql/format (sql-insert-todo todo-map))
+                                 {:return-keys true
+                                  :builder-fn  fx-jdbc/as-unqualified-kebab-maps})
+          (fx/mapcat> (fn [res]
+                        (let [id (or (:id res)
+                                     (:last-insert-rowid res)
+                                     (get res (keyword "last-insert-rowid()"))
+                                     (first (vals res)))]
+                          (query-todo-by-id> id))))))))
 
 (defn update-todo!>
   "Updates fields of an existing todo record and returns the updated entity."
   [id updates]
-  (-> (fx-jdbc/execute-one!> (sql/format (sql-update-todo id updates))
-                             {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
-      (fx/mapcat> (fn [_]
-                    (query-todo-by-id> id)))))
+  (trace/with-span> "db.update-todo" {:id id}
+    (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "update-todo"})
+      (-> (fx-jdbc/execute-one!> (sql/format (sql-update-todo id updates))
+                                 {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+          (fx/mapcat> (fn [_]
+                        (query-todo-by-id> id)))))))
 
 (defn toggle-todo!>
   "Toggles the `:completed` boolean of a todo and updates `:updated-at`."
   [id updated-at]
-  (-> (fx-jdbc/execute-one!> (sql/format (sql-toggle-todo id updated-at))
-                             {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
-      (fx/mapcat> (fn [_]
-                    (query-todo-by-id> id)))))
+  (trace/with-span> "db.toggle-todo" {:id id}
+    (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "toggle-todo"})
+      (-> (fx-jdbc/execute-one!> (sql/format (sql-toggle-todo id updated-at))
+                                 {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+          (fx/mapcat> (fn [_]
+                        (query-todo-by-id> id)))))))
 
 (defn delete-todo!>
   "Deletes a todo by primary key `id`."
   [id]
-  (fx-jdbc/execute-one!> (sql/format (sql-delete-todo id))
-                         {:builder-fn fx-jdbc/as-unqualified-kebab-maps}))
+  (trace/with-span> "db.delete-todo" {:id id}
+    (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "delete-todo"})
+      (fx-jdbc/execute-one!> (sql/format (sql-delete-todo id))
+                             {:builder-fn fx-jdbc/as-unqualified-kebab-maps}))))

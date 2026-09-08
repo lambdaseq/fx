@@ -93,11 +93,11 @@
       (is (fx/effect? toggle-eff))
       (is (fx/effect? delete-eff))
 
-      (is (= [:succeed :mapcat] (fxu/effect-tags create-eff)))
-      (is (= [:try :map :mapcat] (fxu/effect-tags get-eff)))
-      (is (= [:try :map] (fxu/effect-tags list-eff)))
-      (is (= [:try :map :mapcat :mapcat] (fxu/effect-tags toggle-eff)))
-      (is (= [:try :map :mapcat :mapcat] (fxu/effect-tags delete-eff))))))
+      (is (= [:with-span] (fxu/effect-tags create-eff)))
+      (is (= [:with-span] (fxu/effect-tags get-eff)))
+      (is (= [:with-span] (fxu/effect-tags list-eff)))
+      (is (= [:with-span] (fxu/effect-tags toggle-eff)))
+      (is (= [:with-span] (fxu/effect-tags delete-eff))))))
 
 ;; ---------------------------------------------------------------------------
 ;; 3. Pure Effect Mocking & Splicing without Real Database
@@ -107,14 +107,14 @@
   (testing "get-todo-by-id> business logic can be tested in isolation by replacing db effect"
     ;; Instead of spinning up a database or mocking global methods with `with-redefs`,
     ;; we demonstrate how `fx.utils` allows transforming pure effect ASTs.
-    (let [pipeline (domain/get-todo-by-id> 42)
+    (let [pipeline (:body (:data (domain/get-todo-by-id> 42)))
           ;; Case A: Replace the root DB query with a successful mock entity
           mock-entity {:id 42 :title "Mocked Task" :completed false}
-          mocked-pipeline-success (fxu/replace-by-tag pipeline :try (fx/succeed> mock-entity))
+          mocked-pipeline-success (fxu/replace-by-tag pipeline :with-span (fx/succeed> mock-entity))
           result-success (fx/run-sync! mocked-pipeline-success)
 
           ;; Case B: Replace the root DB query with nil (record not found in DB)
-          mocked-pipeline-missing (fxu/replace-by-tag pipeline :try (fx/succeed> nil))
+          mocked-pipeline-missing (fxu/replace-by-tag pipeline :with-span (fx/succeed> nil))
           result-missing (fx/run-sync! mocked-pipeline-missing)]
 
       (is (= mock-entity result-success))

@@ -32,6 +32,10 @@
           <option name="type" value="TEST_SOURCE" />
         </FolderState>
         <FolderState>
+          <option name="dirUrl" value="file://$PROJECT_DIR$/modules/fx-observability/test" />
+          <option name="type" value="TEST_SOURCE" />
+        </FolderState>
+        <FolderState>
           <option name="dirUrl" value="file://$PROJECT_DIR$/modules/fx-ring/test" />
           <option name="type" value="TEST_SOURCE" />
         </FolderState>

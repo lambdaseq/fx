@@ -2,18 +2,28 @@
   (:require [fx.core :as fx]
             [fx.jdbc :as-alias fx.jdbc]
             [fx.layer :as fx-layer]
-            [fx.ring :as fx-ring]
+            [fx.observability.log :as log]
+            [fx.observability.metrics :as metrics]
             [ring.adapter.jetty :as jetty]
             [todo.db :as db]
             [todo.routes :as routes])
   (:gen-class)
-  (:import (java.io Closeable)))
+  (:import (java.io Closeable)
+           (org.eclipse.jetty.server Server)))
 
 (defonce ^:private active-system (atom nil))
 
 ;; ---------------------------------------------------------------------------
 ;; Layer Definitions
 ;; ---------------------------------------------------------------------------
+
+(defn metrics-layer>
+  "Defines a managed metrics registry layer using `fx.observability.metrics/metrics-layer>`.
+   Acquires a fresh isolated concurrent metrics registry; resets on release."
+  ([]
+   (metrics/metrics-layer>))
+  ([registry]
+   (metrics/metrics-layer> registry)))
 
 (defn datasource-layer>
   "Defines a managed datasource layer for SQLite.
@@ -45,15 +55,17 @@
                                                                      :join? false})]
                                     (println (str "Todo application server started successfully on http://localhost:" port))
                                     server))
-                                :server/start-failed))))
+                                :server/start-failed)))
+         (log/log-info> "HTTP server layer initialized" {:port port}))
      (fn [server]
-       (fx/try> (fn []
-                  (println "Stopping Jetty server...")
-                  (.close server))
-                :server/stop-failed)))))
+       (-> (fx/try> (fn []
+                      (println "Stopping Jetty server...")
+                      (.close server))
+                    :server/stop-failed)
+           (log/log-info> "HTTP server layer stopped"))))))
 
 (defn app-layer>
-  "Composes datasource and HTTP server layers into a complete application system layer."
+  "Composes datasource, metrics registry, and HTTP server layers into a complete application system layer."
   ([]
    (app-layer> {}))
   ([opts]
@@ -63,6 +75,7 @@
                   3000)
          db-spec (or (:db-spec opts) db/default-db-spec)]
      (fx-layer/compose>
+       (metrics-layer>)
        (datasource-layer> db-spec)
        (http-server-layer> port)))))
 
@@ -88,7 +101,7 @@
      (reset! active-system system)
      (when (:join? opts)
        (when-let [server (get system :todo/server)]
-         (.join ^org.eclipse.jetty.server.Server server)))
+         (.join ^Server server)))
      (get system :todo/server))))
 
 (defn stop-server!
