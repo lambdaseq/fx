@@ -1,43 +1,22 @@
 (ns todo.domain
-  (:require [clojure.string :as str]
-            [fx.core :as fx]
-            [todo.db :as db])
+  (:require [fx.core :as fx]
+            [todo.db :as db]
+            [todo.schema :as schema])
   (:import (java.time Instant)))
 
 ;; ---------------------------------------------------------------------------
 ;; Input Validation
 ;; ---------------------------------------------------------------------------
 
-(defn- blank-str? [s]
-  (or (nil? s) (not (string? s)) (str/blank? s)))
+(defn validate-create-payload>
+  "Validates and coerces payload for creating a todo."
+  [payload]
+  (schema/validate-create-todo> payload))
 
-(defn- validate-create-payload [payload]
-  (cond
-    (not (map? payload))
-    (fx/fail> :todo/invalid-input {:message "Request body must be a JSON object"})
-
-    (blank-str? (:title payload))
-    (fx/fail> :todo/invalid-input {:message "Field 'title' is required and must not be blank"
-                                   :field   :title})
-
-    :else
-    (fx/succeed> payload)))
-
-(defn- validate-update-payload [payload]
-  (cond
-    (not (map? payload))
-    (fx/fail> :todo/invalid-input {:message "Request body must be a JSON object"})
-
-    (and (contains? payload :title) (blank-str? (:title payload)))
-    (fx/fail> :todo/invalid-input {:message "Field 'title' must not be blank if provided"
-                                   :field   :title})
-
-    (and (contains? payload :completed) (not (boolean? (:completed payload))))
-    (fx/fail> :todo/invalid-input {:message "Field 'completed' must be a boolean if provided"
-                                   :field   :completed})
-
-    :else
-    (fx/succeed> payload)))
+(defn validate-update-payload>
+  "Validates and coerces payload for updating a todo."
+  [payload]
+  (schema/validate-update-todo> payload))
 
 ;; ---------------------------------------------------------------------------
 ;; Domain Effect Pipelines
@@ -65,12 +44,12 @@
   "Validates input payload and inserts a new todo with timestamps.
    Fails with `:todo/invalid-input` if payload validation fails."
   [payload]
-  (-> (validate-create-payload payload)
-      (fx/mapcat> (fn [{:keys [title description]}]
+  (-> (validate-create-payload> payload)
+      (fx/mapcat> (fn [{:keys [title description completed]}]
                     (let [now (str (Instant/now))
-                          record {:title       (str/trim title)
-                                  :description (some-> description str/trim)
-                                  :completed   false
+                          record {:title       title
+                                  :description description
+                                  :completed   (boolean completed)
                                   :created-at  now
                                   :updated-at  now}]
                       (db/insert-todo!> record))))))
@@ -79,17 +58,17 @@
   "Validates update payload, verifies existence, and updates todo fields.
    Fails with `:todo/invalid-input` or `:todo/not-found`."
   [id payload]
-  (-> (validate-update-payload payload)
+  (-> (validate-update-payload> payload)
       (fx/mapcat> (fn [valid-payload]
                     (-> (get-todo-by-id> id)
                         (fx/mapcat> (fn [_existing]
                                       (let [now (str (Instant/now))
                                             updates (cond-> {:updated-at now}
                                                       (contains? valid-payload :title)
-                                                      (assoc :title (str/trim (:title valid-payload)))
+                                                      (assoc :title (:title valid-payload))
 
                                                       (contains? valid-payload :description)
-                                                      (assoc :description (some-> (:description valid-payload) str/trim))
+                                                      (assoc :description (:description valid-payload))
 
                                                       (contains? valid-payload :completed)
                                                       (assoc :completed (:completed valid-payload)))]

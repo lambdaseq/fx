@@ -28,7 +28,8 @@
           res-str (fx/run-sync! (domain/create-todo> "invalid"))
           res-empty (fx/run-sync! (domain/create-todo> {}))
           res-blank (fx/run-sync! (domain/create-todo> {:title "   "}))
-          res-nonstr (fx/run-sync! (domain/create-todo> {:title 123}))]
+          res-nonstr (fx/run-sync! (domain/create-todo> {:title 123}))
+          res-bad-completed (fx/run-sync! (domain/create-todo> {:title "Task" :completed "yes"}))]
 
       (is (fx/failure? res-nil))
       (is (= :todo/invalid-input (fx/tag res-nil)))
@@ -46,7 +47,11 @@
 
       (is (fx/failure? res-nonstr))
       (is (= :todo/invalid-input (fx/tag res-nonstr)))
-      (is (= :title (:field (fx/error-data res-nonstr)))))))
+      (is (= :title (:field (fx/error-data res-nonstr))))
+
+      (is (fx/failure? res-bad-completed))
+      (is (= :todo/invalid-input (fx/tag res-bad-completed)))
+      (is (= :completed (:field (fx/error-data res-bad-completed)))))))
 
 (deftest test-update-todo-validation-short-circuiting
   (testing "update-todo> validates payload and fails fast on invalid input"
@@ -121,6 +126,17 @@
 ;; ---------------------------------------------------------------------------
 ;; 4. End-to-End Domain Pipelines with SQLite In-Memory Database
 ;; ---------------------------------------------------------------------------
+
+(deftest test-domain-create-todo-with-completed-flag
+  (let [ds (fresh-test-ds)
+        ctx {:fx.jdbc/datasource ds}]
+    (testing "create-todo> supports creating pre-completed todo"
+      (let [created (fx/run-sync!
+                      (domain/create-todo> {:title "Done item" :completed true})
+                      ctx)]
+        (is (= 1 (:id created)))
+        (is (= "Done item" (:title created)))
+        (is (true? (:completed created)))))))
 
 (deftest test-domain-crud-lifecycle
   (let [ds (fresh-test-ds)

@@ -39,9 +39,11 @@
 
      (let [app (routes/create-app ds)
            server (jetty/run-jetty app {:port  port
-                                        :join? join?})]
+                                        :join? false})]
        (reset! server-instance server)
        (println (str "Todo application server started successfully on http://localhost:" port))
+       (when join?
+         (.join server))
        server))))
 
 (defn stop-server!
@@ -60,4 +62,7 @@
 (defn -main
   "Main CLI entrypoint."
   [& _args]
+  (.addShutdownHook (Runtime/getRuntime)
+                    (Thread. (fn []
+                               (stop-server!))))
   (start-server! {:join? true}))

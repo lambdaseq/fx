@@ -5,7 +5,8 @@
             [muuntaja.middleware :as muuntaja-middleware]
             [reitit.ring :as ring]
             [ring.middleware.params :as params-middleware]
-            [todo.domain :as domain]))
+            [todo.domain :as domain]
+            [todo.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
 ;; Failure Translation Map
@@ -34,12 +35,6 @@
 ;; Request Helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- parse-id [id-str]
-  (try
-    (Long/parseLong (str id-str))
-    (catch Throwable _
-      nil)))
-
 (defn- extract-payload [req]
   (or (:body-params req) (:body req) {}))
 
@@ -51,12 +46,9 @@
   "Effect handler for `GET /api/todos`. Supports `?completed=true|false`."
   [req]
   (let [completed-param (get-in req [:params "completed"]
-                                (get-in req [:query-params "completed"]))
-        completed-filter (case completed-param
-                           "true"  true
-                           "false" false
-                           nil)]
-    (-> (domain/list-todos> completed-filter)
+                                (get-in req [:query-params "completed"]))]
+    (-> (schema/coerce-filter> completed-param)
+        (fx/mapcat> domain/list-todos>)
         (fx-resp/ok>))))
 
 (defn create-todo-handler>
@@ -69,35 +61,31 @@
 (defn get-todo-handler>
   "Effect handler for `GET /api/todos/:id`."
   [req]
-  (if-let [id (parse-id (get-in req [:path-params :id]))]
-    (-> (domain/get-todo-by-id> id)
-        (fx-resp/ok>))
-    (fx/fail> :todo/invalid-input {:message "Todo ID must be a valid integer"})))
+  (-> (schema/coerce-id> (get-in req [:path-params :id]))
+      (fx/mapcat> domain/get-todo-by-id>)
+      (fx-resp/ok>)))
 
 (defn update-todo-handler>
   "Effect handler for `PUT /api/todos/:id`."
   [req]
-  (if-let [id (parse-id (get-in req [:path-params :id]))]
-    (let [payload (extract-payload req)]
-      (-> (domain/update-todo> id payload)
-          (fx-resp/ok>)))
-    (fx/fail> :todo/invalid-input {:message "Todo ID must be a valid integer"})))
+  (let [payload (extract-payload req)]
+    (-> (schema/coerce-id> (get-in req [:path-params :id]))
+        (fx/mapcat> (fn [id] (domain/update-todo> id payload)))
+        (fx-resp/ok>))))
 
 (defn toggle-todo-handler>
   "Effect handler for `PATCH /api/todos/:id/toggle`."
   [req]
-  (if-let [id (parse-id (get-in req [:path-params :id]))]
-    (-> (domain/toggle-todo> id)
-        (fx-resp/ok>))
-    (fx/fail> :todo/invalid-input {:message "Todo ID must be a valid integer"})))
+  (-> (schema/coerce-id> (get-in req [:path-params :id]))
+      (fx/mapcat> domain/toggle-todo>)
+      (fx-resp/ok>)))
 
 (defn delete-todo-handler>
   "Effect handler for `DELETE /api/todos/:id`."
   [req]
-  (if-let [id (parse-id (get-in req [:path-params :id]))]
-    (-> (domain/delete-todo> id)
-        (fx-resp/ok>))
-    (fx/fail> :todo/invalid-input {:message "Todo ID must be a valid integer"})))
+  (-> (schema/coerce-id> (get-in req [:path-params :id]))
+      (fx/mapcat> domain/delete-todo>)
+      (fx-resp/ok>)))
 
 ;; ---------------------------------------------------------------------------
 ;; Reitit Routes & App Construction

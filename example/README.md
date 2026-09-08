@@ -75,13 +75,15 @@ example/
 │       ├── db.clj       # SQLite datasource, DDL, and HoneySQL queries
 │       ├── domain.clj   # Pure business logic & effect pipelines
 │       ├── routes.clj   # Reitit router, fx.ring wrapping, & failure map
+│       ├── schema.clj   # Malli schemas, data coercion, & validation
 │       └── main.clj     # Server lifecycle (start-server!, stop-server!, -main)
 └── test/
     └── todo/
         ├── api_test.clj    # Integration tests for HTTP endpoints & fx pipelines
         ├── db_test.clj     # Tests for database queries, HoneySQL, AST, and context DI
         ├── domain_test.clj # Tests for validation short-circuiting, effect mocking, & domain logic
-        └── routes_test.clj # Tests for route effect handlers & failure translation map
+        ├── routes_test.clj # Tests for route effect handlers & failure translation map
+        └── schema_test.clj # Tests for Malli schemas, coercion, and validation errors
 ```
 
 ---
@@ -111,13 +113,13 @@ Todo application server started successfully on http://localhost:3000
 
 From the repository root:
 ```bash
-clojure -M:example -e "(require 'clojure.test 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test) (let [res (clojure.test/run-tests 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test)] (when (pos? (+ (:fail res) (:error res))) (System/exit 1)))"
+clojure -M:example -e "(require 'clojure.test 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test 'todo.schema-test) (let [res (clojure.test/run-tests 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test 'todo.schema-test)] (when (pos? (+ (:fail res) (:error res))) (System/exit 1)))"
 ```
 
 Or from the `example/` directory:
 ```bash
 cd example
-clojure -M:test -e "(require 'clojure.test 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test) (let [res (clojure.test/run-tests 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test)] (when (pos? (+ (:fail res) (:error res))) (System/exit 1)))"
+clojure -M:test -e "(require 'clojure.test 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test 'todo.schema-test) (let [res (clojure.test/run-tests 'todo.api-test 'todo.db-test 'todo.domain-test 'todo.routes-test 'todo.schema-test)] (when (pos? (+ (:fail res) (:error res))) (System/exit 1)))"
 ```
 
 ### 3. Interactive HTTP Requests (`test.http`)

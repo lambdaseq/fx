@@ -16,7 +16,7 @@
     <orderEntry type="library" name="Deps: fipp/fipp:0.6.24" level="project" />
     <orderEntry type="library" name="Deps: hashp/hashp:0.2.2" level="project" />
     <orderEntry type="library" name="Deps: io.github.cognitect-labs/test-runner:dfb30d" level="project" />
-    <orderEntry type="library" name="Deps: io.github.conjurernix/fx.core:0.0.1-alpha2" level="project" />
+    <orderEntry type="library" name="Deps: io.github.conjurernix/fx.core:0.0.1-alpha3" level="project" />
     <orderEntry type="library" name="Deps: mvxcvi/arrangement:2.0.0" level="project" />
     <orderEntry type="library" name="Deps: mvxcvi/puget:1.3.2" level="project" />
     <orderEntry type="library" name="Deps: net.cgrand/macrovich:0.2.1" level="project" />
