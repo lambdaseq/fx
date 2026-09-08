@@ -1,7 +1,8 @@
 (ns todo.db
   (:require [fx.core :as fx]
             [fx.jdbc :as fx-jdbc]
-            [honey.sql :as sql])
+            [honey.sql :as sql]
+            [next.jdbc :as jdbc])
   (:import (javax.sql DataSource)
            (org.sqlite SQLiteDataSource)))
 
@@ -63,8 +64,15 @@
      updated_at TEXT NOT NULL
    )")
 
-(defn init-db!>
+(defn init-db!
   "Executes the DDL statement creating the `todos` table."
+  ([]
+   (init-db! nil))
+  ([connectable]
+   (jdbc/execute! connectable [ddl-create-todos-table])))
+
+(defn init-db!>
+  "Effect executing the DDL statement creating the `todos` table."
   ([]
    (init-db!> nil))
   ([connectable]

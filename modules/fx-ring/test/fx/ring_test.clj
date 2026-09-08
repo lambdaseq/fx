@@ -192,6 +192,28 @@
       (is (= {:status 200 :body "from-services"} (app1 {:uri "/"})))
       (is (= {:status 200 :body "from-context"} (app2 {:uri "/"})))))
 
+  (testing "wrap-fx-context middleware injects context map into sync and async handlers"
+    (let [handler (fn [_req]
+                    (-> (fx/service> :db-pool)
+                        (fx/map> (fn [pool] {:status 200 :body (str "Connected to " pool)}))))
+          endpoint (fx-ring/wrap-fx handler)
+          app (fx-ring/wrap-fx-context endpoint {:db-pool "production-db"})
+          sync-res (app {:uri "/data"})]
+      (is (= {:status 200 :body "Connected to production-db"} sync-res))
+
+      ;; 3-arity async test
+      (let [latch (CountDownLatch. 1)
+            res-atom (atom nil)]
+        (app {:uri "/data"}
+             (fn [res]
+               (reset! res-atom res)
+               (.countDown latch))
+             (fn [err]
+               (reset! res-atom err)
+               (.countDown latch)))
+        (is (.await latch 2 TimeUnit/SECONDS))
+        (is (= {:status 200 :body "Connected to production-db"} @res-atom)))))
+
   (testing "handles provider exceptions in sync and async paths"
     (let [failing-provider (fn [_req] (throw (RuntimeException. "Provider failure")))
           handler (fn [_req] (fx-resp/ok> "ok"))

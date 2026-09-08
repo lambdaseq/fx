@@ -1,15 +1,77 @@
 (ns todo.main
   (:require [fx.core :as fx]
+            [fx.jdbc :as-alias fx.jdbc]
+            [fx.layer :as fx-layer]
+            [fx.ring :as fx-ring]
             [ring.adapter.jetty :as jetty]
             [todo.db :as db]
             [todo.routes :as routes])
-  (:gen-class))
+  (:gen-class)
+  (:import (java.io Closeable)))
 
-(defonce ^:private server-instance (atom nil))
-(defonce ^:private datasource-instance (atom nil))
+(defonce ^:private active-system (atom nil))
+
+;; ---------------------------------------------------------------------------
+;; Layer Definitions
+;; ---------------------------------------------------------------------------
+
+(defn datasource-layer>
+  "Defines a managed datasource layer for SQLite.
+   Acquires datasource and initializes schema; closes datasource on release."
+  ([]
+   (datasource-layer> db/default-db-spec))
+  ([db-spec]
+   (fx-layer/make> ::fx.jdbc/datasource
+     (-> (fx/try> (fn [] (db/create-datasource db-spec)) :db/datasource-creation-failed)
+         (fx/tap> db/init-db!))
+     (fn [ds]
+       (fx/try> (fn []
+                  (when (instance? Closeable ds)
+                    (.close ^Closeable ds)))
+                :db/datasource-close-failed)))))
+
+(defn http-server-layer>
+  "Defines a managed HTTP server layer running Ring with embedded Jetty.
+   Acquires Jetty server on `:port`; stops Jetty server on release."
+  ([]
+   (http-server-layer> 3000))
+  ([port]
+   (fx-layer/make> :todo/server
+     (-> (fx/context>)
+         (fx/mapcat> (fn [ctx]
+                       (fx/try> (fn []
+                                  (let [app (routes/create-app ctx)
+                                        server (jetty/run-jetty app {:port  port
+                                                                     :join? false})]
+                                    (println (str "Todo application server started successfully on http://localhost:" port))
+                                    server))
+                                :server/start-failed))))
+     (fn [server]
+       (fx/try> (fn []
+                  (println "Stopping Jetty server...")
+                  (.close server))
+                :server/stop-failed)))))
+
+(defn app-layer>
+  "Composes datasource and HTTP server layers into a complete application system layer."
+  ([]
+   (app-layer> {}))
+  ([opts]
+   (let [port (or (:port opts)
+                  (when-let [env-port (System/getenv "PORT")]
+                    (try (Integer/parseInt env-port) (catch Throwable _ nil)))
+                  3000)
+         db-spec (or (:db-spec opts) db/default-db-spec)]
+     (fx-layer/compose>
+       (datasource-layer> db-spec)
+       (http-server-layer> port)))))
+
+;; ---------------------------------------------------------------------------
+;; Server Lifecycle Controls & Entrypoint
+;; ---------------------------------------------------------------------------
 
 (defn start-server!
-  "Starts the embedded Jetty HTTP server and initializes the SQLite database.
+  "Starts the todo application system using layers.
    Options:
      :port    - TCP port to bind (default: 3000 or env PORT)
      :join?   - Whether the calling thread should block (default: false)
@@ -17,52 +79,31 @@
   ([]
    (start-server! {}))
   ([opts]
-   (when-let [existing @server-instance]
-     (println "Stopping existing server instance...")
-     (.stop existing)
-     (reset! server-instance nil))
+   (when-let [existing @active-system]
+     (println "Stopping existing system instance...")
+     (fx-layer/stop-layer! existing)
+     (reset! active-system nil))
 
-   (let [port (or (:port opts)
-                  (when-let [env-port (System/getenv "PORT")]
-                    (try (Integer/parseInt env-port) (catch Throwable _ nil)))
-                  3000)
-         join? (boolean (:join? opts false))
-         db-spec (or (:db-spec opts) db/default-db-spec)
-         ds (db/create-datasource db-spec)]
-
-     (println "Initializing database schema...")
-     (let [init-result (fx/run-sync! (db/init-db!> ds))]
-       (when (fx/failure? init-result)
-         (throw (ex-info "Database initialization failed" {:result init-result}))))
-
-     (reset! datasource-instance ds)
-
-     (let [app (routes/create-app ds)
-           server (jetty/run-jetty app {:port  port
-                                        :join? false})]
-       (reset! server-instance server)
-       (println (str "Todo application server started successfully on http://localhost:" port))
-       (when join?
-         (.join server))
-       server))))
+   (let [system (fx-layer/start-layer! (app-layer> opts))]
+     (reset! active-system system)
+     (when (:join? opts)
+       (when-let [server (get system :todo/server)]
+         (.join ^org.eclipse.jetty.server.Server server)))
+     (get system :todo/server))))
 
 (defn stop-server!
-  "Stops the active embedded Jetty HTTP server and closes the datasource."
+  "Stops the active system and closes all layer resources."
   []
-  (when-let [server @server-instance]
-    (println "Stopping Jetty server...")
-    (.stop server)
-    (reset! server-instance nil))
-  (when-let [ds @datasource-instance]
-    (when (instance? java.io.Closeable ds)
-      (try (.close ^java.io.Closeable ds) (catch Throwable _ nil)))
-    (reset! datasource-instance nil))
+  (when-let [system @active-system]
+    (println "Stopping application system...")
+    (fx-layer/stop-layer! system)
+    (reset! active-system nil))
   (println "Server stopped."))
 
 (defn -main
   "Main CLI entrypoint."
   [& _args]
-  (.addShutdownHook (Runtime/getRuntime)
-                    (Thread. (fn []
-                               (stop-server!))))
-  (start-server! {:join? true}))
+  (let [port (when-let [env-port (System/getenv "PORT")]
+               (try (Integer/parseInt env-port) (catch Throwable _ nil)))]
+    (fx-layer/launch-sync! (app-layer> (cond-> {} port (assoc :port port)))
+                           {:join? true})))

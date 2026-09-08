@@ -6,19 +6,37 @@
 
 (def request-key :fx.ring/request)
 
+(defn- resolve-provider-val [provider req]
+  (cond
+    (fn? provider)  (try
+                      (provider req)
+                      (catch Throwable t
+                        (throw (ex-info "Exception in context provider" {:request req} t))))
+    (map? provider) provider
+    :else           nil))
+
 (defn build-fx-context
   "Constructs the execution context map for an effect run.
-   Merges resolved provider/services with {request-key req}."
+   Merges resolved provider/services from request and opts with {request-key req}."
   [req opts]
-  (let [provider (or (:provider opts) (:context opts) (:services opts))
-        provided-ctx (cond
-                       (fn? provider)  (try
-                                         (provider req)
-                                         (catch Throwable t
-                                           (throw (ex-info "Exception in context provider" {:request req} t))))
-                       (map? provider) provider
-                       :else           {})]
-    (merge (or provided-ctx {}) {request-key req})))
+  (let [req-provider (or (:fx/context req) (:fx.ring/context req)
+                         (:fx/services req) (:fx.ring/services req)
+                         (:fx/provider req) (:fx.ring/provider req))
+        opts-provider (or (:provider opts) (:context opts) (:services opts))
+        req-ctx (resolve-provider-val req-provider req)
+        opts-ctx (resolve-provider-val opts-provider req)]
+    (merge (or req-ctx {}) (or opts-ctx {}) {request-key req})))
+
+(defn wrap-fx-context
+  "Ring middleware that injects an fx context map or provider function into the request map under `:fx/context`.
+   Can be used at the root or route level of a Ring application to provide ambient services (e.g. database,
+   configuration) to all downstream `wrap-fx` endpoints."
+  [handler context-or-provider]
+  (fn
+    ([req]
+     (handler (assoc req :fx/context context-or-provider)))
+    ([req respond raise]
+     (handler (assoc req :fx/context context-or-provider) respond raise))))
 
 (defn- default-fallback-handler [failure _req]
   (let [err (fx/error-data failure)]

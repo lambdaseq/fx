@@ -61,8 +61,9 @@ Requires `fx/core` (`io.github.conjurernix/fx.core`).
 | Function | Signature | Description |
 |---|---|---|
 | `wrap-fx` | `([handler] [handler opts])` | Adapts an effect handler `(fn [req])` returning an `IEffect` pipeline into a Ring handler supporting 1-arity sync `(fn [req])` and 3-arity async `(fn [req respond raise])`. |
+| `wrap-fx-context` | `[handler context-or-provider]` | Ring middleware that injects an ambient `fx` context map or dynamic provider function into the request under `:fx/context`. |
 | `wrap-fx-failures` | `([handler] [handler opts])` | Middleware for standard Ring handlers that catches returned `IFailure` instances and transforms them into HTTP responses. |
-| `build-fx-context` | `[req opts]` | Merges `{::fx-ring/request req}` with resolved `:provider`, `:services`, or `:context` into an effect context map. |
+| `build-fx-context` | `[req opts]` | Merges `{::fx-ring/request req}` with resolved `:provider`, `:services`, or `:context` from `opts` or request into an effect context map. |
 | `resolve-failure-to-response` | `([failure req] [failure req opts])` | Translates an `IFailure` into a Ring response map using the hybrid resolution strategy. |
 
 #### `wrap-fx` Options Map

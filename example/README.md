@@ -60,6 +60,7 @@ A full-stack functional Clojure REST API demonstrating how to build web services
 1. **Pure Effect Pipelines:** Business logic in `todo.domain` is defined as pure effect descriptions composed via combinators (`fx/map>`, `fx/mapcat>`, `fx/fail>`, `fx/succeed>`).
 2. **Ambient Dependency Injection:** Handlers do not hardcode database connections; `fx.jdbc` statement executors resolve `::fx.jdbc/datasource` dynamically from ambient execution context injected by `fx.ring/wrap-fx`.
 3. **Typed Error Channels:** Validation and lookup failures are returned via `fx/fail>` with domain tags (`:todo/invalid-input`, `:todo/not-found`). `fx.ring/wrap-fx` translates these tags into standard HTTP response maps and JSON status codes via `:failure-map`.
+4. **Composable Layer Lifecycles (`fx.layer`):** Datasource and HTTP server acquisition/release lifecycles are defined as pure layers (`datasource-layer>`, `http-server-layer>`, `app-layer>`), providing deterministic reverse-order teardown and JVM shutdown management via `launch-sync!`.
 
 ---
 
@@ -140,19 +141,21 @@ When the server is running on `http://localhost:3000`, open [`example/test.http`
 
 ## REPL Workflow
 
-You can interactively develop and test effects from the Clojure REPL:
+You can interactively develop and test effects and system layers from the Clojure REPL:
 
 ```clojure
 (require '[todo.main :as main]
          '[todo.db :as db]
          '[todo.domain :as domain]
-         '[fx.core :as fx])
+         '[fx.core :as fx]
+         '[fx.layer :as fx-layer])
 
-;; Start embedded server interactively
-(main/start-server! {:port 3000})
+;; Start embedded server interactively via layers
+(def server (main/start-server! {:port 3000}))
 
-;; Execute effect pipelines directly with run-sync!
-(def ds (fx/run-sync! (db/get-datasource>)))
+;; Or manage layers directly with fx-layer
+(def system (fx-layer/start-layer! (main/app-layer> {:port 3000})))
+(def ds (:fx.jdbc/datasource system))
 (def ctx {:fx.jdbc/datasource ds})
 
 ;; Create a todo via domain effect
@@ -164,8 +167,9 @@ You can interactively develop and test effects from the Clojure REPL:
 ;; Query todos
 (fx/run-sync! (domain/list-todos>) ctx)
 
-;; Stop the server
+;; Stop the server and release layer resources
 (main/stop-server!)
+;; or (fx-layer/stop-layer! system)
 ```
 
 ---

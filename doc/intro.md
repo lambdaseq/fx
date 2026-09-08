@@ -258,3 +258,33 @@ Continuation frames that manage resources can also implement `IUnwindable` to en
     (release-fn resource)
     nil))
 ```
+
+---
+
+## 8. Composable Dependency Injection & Resource Lifecycles (`fx.layer`)
+
+The `fx.layer` module introduces declarative dependency injection and scoped lifecycle management inspired by Effect-ts and ZIO.
+
+### Core Protocols
+
+1. **`IScope`:**
+   - `(add-finalizer! [this finalizer-eff])`: Registers a cleanup effect in the active lifecycle scope.
+   - `(close-scope!> [this])`: Produces an effect executing all registered finalizers in reverse registration order, guaranteeing that each finalizer runs even if preceding finalizers fail or throw exceptions.
+2. **`ILayer`:**
+   - `(-build-eff [this scope])`: Produces an effect that instantiates the layer's services within `scope` and returns a context map.
+
+### AST Layer Types
+
+- `ValueLayer`: Unmanaged static context map.
+- `EffectLayer`: Unmanaged single service computed by evaluating an effect.
+- `ResourceLayer`: Managed single resource acquiring via an effect and registering a release effect in `IScope`.
+- `MapResourceLayer`: Managed multi-service map acquiring via an effect and registering a release effect in `IScope`.
+- `MergeLayer`: Horizontal composition of independent layers.
+- `ComposeLayer`: Vertical composition feeding upstream context to downstream layer acquisition.
+
+### Deterministic Lifecycle Guarantees
+
+When a layer is evaluated via `provide-layer>`, `with-layer>`, or managed via `start-layer!`/`stop-layer!`:
+1. Resources are acquired in sequence.
+2. If any stage during layer acquisition fails, already-acquired resources in the scope are immediately finalized in reverse acquisition order before the failure returns.
+3. Upon pipeline completion, normal exit, or unhandled exceptions, all registered finalizers are executed deterministically.

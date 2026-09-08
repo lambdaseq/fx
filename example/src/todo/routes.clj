@@ -92,36 +92,47 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- fx-endpoint
-  "Wraps an effect handler into a Ring handler with ambient datasource injection
-   and typed failure mapping."
-  [handler datasource]
-  (fx-ring/wrap-fx handler {:provider    {:fx.jdbc/datasource datasource}
-                            :failure-map failure-map}))
+  "Wraps an effect handler into a Ring handler with typed failure mapping.
+   Ambient services (like datasource) are injected via `fx` context."
+  [handler]
+  (fx-ring/wrap-fx handler {:failure-map failure-map}))
 
 (defn create-routes
   "Defines the Reitit route structure for the Todo API."
-  [datasource]
-  [["/api"
-    ["/todos"
-     {:get  {:handler (fx-endpoint list-todos-handler> datasource)}
-      :post {:handler (fx-endpoint create-todo-handler> datasource)}}]
-    ["/todos/:id"
-     {:get    {:handler (fx-endpoint get-todo-handler> datasource)}
-      :put    {:handler (fx-endpoint update-todo-handler> datasource)}
-      :delete {:handler (fx-endpoint delete-todo-handler> datasource)}}]
-    ["/todos/:id/toggle"
-     {:patch {:handler (fx-endpoint toggle-todo-handler> datasource)}}]]])
+  ([]
+   [["/api"
+     ["/todos"
+      {:get  {:handler (fx-endpoint list-todos-handler>)}
+       :post {:handler (fx-endpoint create-todo-handler>)}}]
+     ["/todos/:id"
+      {:get    {:handler (fx-endpoint get-todo-handler>)}
+       :put    {:handler (fx-endpoint update-todo-handler>)}
+       :delete {:handler (fx-endpoint delete-todo-handler>)}}]
+     ["/todos/:id/toggle"
+      {:patch {:handler (fx-endpoint toggle-todo-handler>)}}]]])
+  ([datasource]
+   (create-routes)))
 
 (defn create-app
   "Constructs the complete Ring application with routing, query params parsing,
-   and Muuntaja JSON formatting middleware."
-  [datasource]
-  (-> (ring/ring-handler
-        (ring/router (create-routes datasource))
-        (ring/routes
-          (ring/create-resource-handler {:path "/"})
-          (ring/create-default-handler
-            {:not-found          (constantly {:status 404 :body {:error "Route not found"}})
-             :method-not-allowed (constantly {:status 405 :body {:error "Method not allowed"}})})))
-      (params-middleware/wrap-params)
-      (muuntaja-middleware/wrap-format)))
+   and Muuntaja JSON formatting middleware.
+   Optionally accepts an ambient context map or datasource to inject via `fx-ring/wrap-fx-context`."
+  ([]
+   (create-app nil))
+  ([context-or-datasource]
+   (let [ctx (cond
+               (nil? context-or-datasource) nil
+               (map? context-or-datasource) (if (contains? context-or-datasource :fx.jdbc/datasource)
+                                              context-or-datasource
+                                              (assoc context-or-datasource :fx.jdbc/datasource context-or-datasource))
+               :else {:fx.jdbc/datasource context-or-datasource})]
+     (-> (ring/ring-handler
+           (ring/router (create-routes))
+           (ring/routes
+             (ring/create-resource-handler {:path "/"})
+             (ring/create-default-handler
+               {:not-found          (constantly {:status 404 :body {:error "Route not found"}})
+                :method-not-allowed (constantly {:status 405 :body {:error "Method not allowed"}})})))
+         (cond-> ctx (fx-ring/wrap-fx-context ctx))
+         (params-middleware/wrap-params)
+         (muuntaja-middleware/wrap-format)))))

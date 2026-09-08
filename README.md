@@ -12,7 +12,7 @@ A lightweight, purely functional, and modular effect system for Clojure and Cloj
 
 | Module | Coordinate | Description | Documentation |
 |---|---|---|---|
-| **[`fx.core`](modules/fx-core)** | `io.github.conjurernix/fx.core` | Foundational effect runtime, AST records, standard combinators, failure channels, context DI, and metaprogramming (`fx.utils`). | [Read Core Docs →](modules/fx-core/README.md) |
+| **[`fx.core`](modules/fx-core)** | `io.github.conjurernix/fx.core` | Foundational effect runtime, AST records, standard combinators, failure channels, context DI, composable lifecycle layers (`fx.layer`), and metaprogramming (`fx.utils`). | [Read Core Docs →](modules/fx-core/README.md) |
 | **[`fx.typed`](modules/fx-typed)** | `io.github.conjurernix/fx.typed` | Typed Clojure annotations with full variance tracking across input, output, failure, and context channels. | [Read Typed Docs →](modules/fx-typed/README.md) |
 | **[`fx.jdbc`](modules/fx-jdbc)** | `io.github.conjurernix/fx.jdbc` | Functional JDBC database access and connection pooling with automatic dual-failure transaction rollback semantics. | [Read JDBC Docs →](modules/fx-jdbc/README.md) |
 | **[`fx.ring`](modules/fx-ring)** | `io.github.conjurernix/fx.ring` | Ring HTTP middleware and response combinators for 1-arity synchronous and 3-arity asynchronous web handlers. | [Read Ring Docs →](modules/fx-ring/README.md) |

@@ -103,6 +103,26 @@ Add the dependency to your `deps.edn`:
 
 ---
 
+### Composable Dependency & Lifecycle Layers (`fx.layer`)
+
+| Function | Signature | Description |
+|---|---|---|
+| `from-value>` | `[key val]` | Creates an unmanaged layer providing a single `{key val}` entry. |
+| `from-values>` | `[context-map]` | Creates an unmanaged layer providing a static `context-map`. |
+| `from-effect>` | `[key effect]` | Creates an unmanaged layer providing `{key val}` by evaluating `effect`. |
+| `make>` | `[key acquire-eff release-fn]` | Creates a managed layer acquiring a resource and registering `(release-fn resource) -> Effect` for cleanup. |
+| `make-map>` | `[acquire-eff release-fn]` | Creates a managed layer acquiring a context map and registering `(release-fn ctx-map) -> Effect` for cleanup. |
+| `merge>` | `([] [layer] [l1 l2] [l1 l2 & more])` | Horizontally combines independent layers, evaluating them and merging their context maps. |
+| `compose>` | `([] [layer] [l1 l2] [l1 l2 & more])` | Vertically chains layers, providing accumulated upstream context to downstream layer acquisition. |
+| `provide-layer>` | `([layer] [effect layer])` | Executes an effect pipeline within the context of `layer`, guaranteeing teardown of all acquired resources. |
+| `with-layer>` | `[layer use-eff-fn]` | Executes `(use-eff-fn context)` within the context of `layer`, guaranteeing complete teardown upon completion. |
+| `layer?` | `[x]` | Predicate returning true if `x` implements the `ILayer` protocol. |
+| `start-layer!` | `([layer] [layer initial-context])` | Synchronously starts a layer into an active `LayerSystem` record (`Closeable`, `ILookup`, `IDeref`). |
+| `stop-layer!` | `[system]` | Shuts down an active system, deterministically executing all layer finalizers in reverse acquisition order. |
+| `launch-sync!` | `([layer] [layer opts])` | Starts a layer, registers JVM shutdown hooks for graceful termination, and optionally joins/blocks calling thread. |
+
+---
+
 ### Pipeline Utilities & Metaprogramming (`fx.utils`)
 
 | Function | Signature | Description |
@@ -359,6 +379,86 @@ Recover from failures using `catch>` for specific error tags or `catchall>` for 
 
 @future-res
 ;; => 101
+```
+
+### 12. Composable Dependency & Lifecycle Layers (`fx.layer`)
+
+`fx.layer` provides declarative dependency injection and resource lifecycle management inspired by Effect-ts and ZIO. Layers represent blueprints for creating and tearing down environmental services (e.g. database connection pools, HTTP servers, queue listeners) with guaranteed reverse-order finalization.
+
+#### 1. Defining Layers
+
+Use `from-value>`, `from-values>`, or `from-effect>` for simple unmanaged services, and `make>` or `make-map>` for lifecycle-managed resources:
+
+```clojure
+(require '[fx.layer :as fx-layer])
+
+;; Unmanaged configuration layer
+(def config-layer
+  (fx-layer/from-values> {:port 8080 :db-spec {:dbtype "sqlite" :dbname "app.db"}}))
+
+;; Managed database layer: acquires connection pool, closes on teardown
+(def db-layer
+  (fx-layer/make> :db/pool
+    (fx/try> (fn [] (create-connection-pool)) :db/pool-creation-failed)
+    (fn [pool]
+      (fx/try> (fn [] (.close pool)) :db/pool-close-failed))))
+
+;; Managed HTTP server layer requiring :db/pool and :port from upstream context
+(def http-server-layer
+  (fx-layer/make> :http/server
+    (-> (fx/service> :db/pool)
+        (fx/mapcat> (fn [pool]
+                      (fx/try> (fn [] (start-http-server pool 8080))
+                               :http/server-start-failed))))
+    (fn [server]
+      (fx/try> (fn [] (.stop server)) :http/server-stop-failed))))
+```
+
+#### 2. Composing Layers (Horizontal & Vertical)
+
+- **Horizontal Composition (`merge>`)**: Evaluates independent layers in parallel/sequence and combines their context maps.
+- **Vertical Composition (`compose>`)**: Chains layers sequentially, feeding the context provided by parent layers into downstream layer constructors.
+
+```clojure
+;; App layer composed vertically: config -> db -> http-server
+(def app-layer
+  (fx-layer/compose>
+    config-layer
+    db-layer
+    http-server-layer))
+```
+
+#### 3. Scoped Execution (`provide-layer>` and `with-layer>`)
+
+`provide-layer>` evaluates an effect pipeline within the layer's environment, automatically releasing all acquired resources in reverse order upon completion (or failure/exception):
+
+```clojure
+(-> (fx/service> :http/server)
+    (fx/map> (fn [srv] (str "Server running on port: " (:port srv))))
+    (fx-layer/provide-layer> app-layer)
+    (fx/run-sync!))
+;; Automatically acquires config, db, http-server -> executes effect -> closes http-server, db
+```
+
+#### 4. Managing Application Lifecycles (`start-layer!`, `stop-layer!`, `launch-sync!`)
+
+For long-running servers and integration test suites, manage active systems directly:
+
+```clojure
+;; Start system synchronously
+(def system (fx-layer/start-layer! app-layer))
+
+;; Access services via ILookup / deref
+(:db/pool system)
+(:http/server system)
+
+;; Explicit teardown (Closeable)
+(fx-layer/stop-layer! system)
+;; or (.close system)
+
+;; Entrypoint with JVM shutdown hooks and optional blocking
+(defn -main [& _args]
+  (fx-layer/launch-sync! app-layer {:join? true}))
 ```
 
 ---
