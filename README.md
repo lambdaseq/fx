@@ -13,6 +13,7 @@ A lightweight, purely functional, and modular effect system for Clojure and Cloj
 | Module | Coordinate | Description | Documentation |
 |---|---|---|---|
 | **[`fx.core`](modules/fx-core)** | `io.github.conjurernix/fx.core` | Foundational effect runtime, AST records, standard combinators, failure channels, context DI, composable lifecycle layers (`fx.layer`), and metaprogramming (`fx.utils`). | [Read Core Docs →](modules/fx-core/README.md) |
+| **[`fx.async`](modules/fx-async)** | `io.github.conjurernix/fx.async` | Structured concurrency, lightweight fibers, parallel combinators (`race>`, `all-par>`, `map-par>`), `core.async` CSP channel bridging, and async coordination primitives. | [Read Async Docs →](modules/fx-async/README.md) |
 | **[`fx.schedule`](modules/fx-schedule)** | `io.github.conjurernix/fx.schedule` | Composable schedules, recurrence policies, retry combinators, and resilience primitives (circuit breaker, rate limiter). | [Read Schedule Docs →](modules/fx-schedule/README.md) |
 | **[`fx.observability`](modules/fx-observability)** | `io.github.conjurernix/fx.observability` | Zero-dependency contextual structured logging (`fx.observability.log`), distributed tracing spans & W3C headers (`fx.observability.trace`), concurrent in-memory metrics (`fx.observability.metrics`), typed Cause failure diagnostics (`fx.observability.diagnostics`), and telemetry event taps (`fx.observability.telemetry`). | [Read Observability Docs →](modules/fx-observability/README.md) |
 | **[`fx.typed`](modules/fx-typed)** | `io.github.conjurernix/fx.typed` | Typed Clojure annotations with full variance tracking across input, output, failure, and context channels. | [Read Typed Docs →](modules/fx-typed/README.md) |
@@ -204,6 +205,39 @@ The core module provides the primitives to build, compose, and execute pure effe
 
 ---
 
+### 7. `fx.async` — Structured Concurrency & Async Coordination
+
+`fx.async` provides first-class structured concurrency and async coordination. It unifies Java Virtual Threads, JVM thread pools, and `core.async` go-routines under a composable effect pipeline with cascading hierarchical cancellation and resource unwinding safety.
+
+Features include:
+- **Lightweight Fibers & Structured Lifecycle**: `fork>`, `join>`, and `interrupt>` with guaranteed unwind finalizers.
+- **Structured Parallelism**: `race>`, `all-par>`, and `map-par>` with bounded concurrency controls (`{:concurrency n}`) and fail-fast short-circuiting.
+- **`core.async` Channel Bridging**: `chan>`, `chan-put>`, `chan-take>`, `chan-alts>`, `chan-drain>`, `chan-pipe>`, and `chan-close>`.
+- **Coordination Primitives**: Bounded Queues (`queue-bounded>`), broadcast Hubs (`hub-bounded>`), single-assignment Deferreds (`deferred>`), Counting Semaphores (`semaphore>`, `with-permit>`), Countdown Latches (`countdown-latch>`), and atomic state cells (`ref>`).
+
+```clojure
+(ns example.async
+  (:require [fx.async :as fxa]
+            [fx.core :as fx]))
+
+;; Bounded parallel execution across a sequence
+(fx/run-sync!
+  (fxa/map-par>
+    (fn [id] (fetch-item> id))
+    [1 2 3 4 5 6 7 8]
+    {:concurrency 4}))
+
+;; Speculative racing with automatic cancellation of slower competitors
+(fx/run-sync!
+  (fxa/race>
+    [(fetch-from-primary-cache>)
+     (fetch-from-remote-service>)]))
+```
+
+👉 **[Detailed `fx.async` Documentation & API Reference →](modules/fx-async/README.md)**
+
+---
+
 ## Installation
 
 Add the necessary modules to your `deps.edn`:
@@ -212,6 +246,9 @@ Add the necessary modules to your `deps.edn`:
 {:deps
  {;; Foundational effect system
   io.github.conjurernix/fx.core          {:mvn/version "0.0.1-alpha"}
+
+  ;; Structured concurrency, fibers, and core.async integration
+  io.github.conjurernix/fx.async         {:mvn/version "0.0.1-alpha"}
 
   ;; Composable schedules & resilience (retries, rate limiting, circuit breaker)
   io.github.conjurernix/fx.schedule      {:mvn/version "0.0.1-alpha"}
