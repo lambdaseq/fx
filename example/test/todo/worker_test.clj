@@ -1,5 +1,6 @@
 (ns todo.worker-test
   (:require [clojure.test :refer [deftest is testing]]
+            [fx.async :as fxa]
             [fx.core :as fx]
             [fx.layer :as fx-layer]
             [fx.observability.metrics :as metrics]
@@ -66,6 +67,31 @@
                       0)]
           (is (>= cnt 1)))))))
 
+(deftest test-parallel-import-todos
+  (let [ds (db/create-datasource (test-db-url))
+        _ (fx/run-sync! (db/init-db!> ds))
+        ctx {:fx.jdbc/datasource ds}
+        raw-todos [{:title "Batch Task 1" :description "Desc 1"}
+                   {:title "Batch Task 2" :description "Desc 2"}
+                   {:title "Batch Task 3" :description "Desc 3"}
+                   {:title "Batch Task 4" :description "Desc 4"}]]
+    (testing "parallel-import-todos> imports batch using map-par>"
+      (let [res (fx/run-sync! (worker/parallel-import-todos> raw-todos 2) ctx)]
+        (is (= 4 (count res)))
+        (let [all-db (fx/run-sync! (db/query-todos>) ctx)]
+          (is (= 4 (count all-db))))))))
+
+(deftest test-notification-hub-worker
+  (testing "notification-hub> creates broadcast hub and routes events"
+    (let [hub (fx/run-sync! (worker/notification-hub> 10))]
+      (is (fxa/hub? hub))
+      (let [sub1 (fx/run-sync! (fxa/hub-subscribe> hub))
+            sub2 (fx/run-sync! (fxa/hub-subscribe> hub))]
+        (fx/run-sync! (fxa/hub-publish> hub {:type :todo/created :id 101}))
+        (is (= {:type :todo/created :id 101} (fx/run-sync! (fxa/queue-take> sub1))))
+        (is (= {:type :todo/created :id 101} (fx/run-sync! (fxa/queue-take> sub2))))
+        (fx/run-sync! (fxa/hub-shutdown> hub))))))
+
 (deftest test-worker-layer-lifecycle
   (let [ds (db/create-datasource (test-db-url))
         _ (fx/run-sync! (db/init-db!> ds))
@@ -82,7 +108,7 @@
         (is (map? started))
         (is (contains? started :todo/worker))
         (let [handle (get started :todo/worker)]
-          (is (some? (:thread handle)))
+          (is (some? (:fiber handle)))
           ;; Let worker loop tick once
           (Thread/sleep 50)
           ;; Stop worker loop

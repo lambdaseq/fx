@@ -1,11 +1,13 @@
 (ns todo.worker
-  "Background scheduled maintenance worker managed via `fx.layer`."
-  (:require [fx.core :as fx]
+  "Background scheduled maintenance and asynchronous batch workers using `fx.async` and `fx.layer`."
+  (:require [fx.async :as fxa]
+            [fx.core :as fx]
             [fx.layer :as fx-layer]
             [fx.observability.log :as log]
             [fx.observability.metrics :as metrics]
             [fx.schedule :as sched]
-            [todo.db :as db]))
+            [todo.db :as db])
+  (:import (java.time Instant)))
 
 ;; ---------------------------------------------------------------------------
 ;; Maintenance Task
@@ -22,39 +24,67 @@
         (metrics/track-success-count> (metrics/metric-counter "todo.maintenance.runs.total")))))
 
 ;; ---------------------------------------------------------------------------
-;; Worker Loop Lifecycle
+;; Parallel Batch Import Worker using map-par>
+;; ---------------------------------------------------------------------------
+
+(defn parallel-import-todos>
+  "Imports a collection of raw todo items in parallel using bounded concurrency."
+  ([todos]
+   (parallel-import-todos> todos 4))
+  ([todos concurrency]
+   (fxa/map-par>
+     (fn [item]
+       (let [now (str (Instant/now))
+             record {:title       (:title item)
+                     :description (:description item)
+                     :completed   (boolean (:completed item))
+                     :created-at  now
+                     :updated-at  now}]
+         (db/insert-todo!> record)))
+     todos
+     {:concurrency concurrency})))
+
+;; ---------------------------------------------------------------------------
+;; Event Notification Hub Constructor
+;; ---------------------------------------------------------------------------
+
+(defn notification-hub>
+  "Creates an async broadcast Hub for system notifications."
+  ([]
+   (notification-hub> 32))
+  ([capacity]
+   (fxa/hub-bounded> capacity)))
+
+;; ---------------------------------------------------------------------------
+;; Worker Loop Lifecycle (Fiber-backed)
 ;; ---------------------------------------------------------------------------
 
 (defn start-worker-loop!
-  "Starts a background thread that executes `maintenance-task>` every `interval-ms` milliseconds."
+  "Starts a background thread/fiber executing `maintenance-task>` every `interval-ms` milliseconds."
   ([ctx]
    (start-worker-loop! ctx 60000 30))
   ([ctx interval-ms days-old]
    (let [running (atom true)
-         thread (Thread.
-                  (fn []
-                    (try
-                      (while @running
-                        (try
-                          (fx/run-sync! (maintenance-task> days-old) ctx)
-                          (catch Throwable t
-                            (println "Worker task error:" (.getMessage t))))
-                        (Thread/sleep (long interval-ms)))
-                      (catch InterruptedException _
-                        nil)))
-                  "todo-maintenance-worker")]
-     (.setDaemon thread true)
-     (.start thread)
-     {:running running :thread thread})))
+         fiber   (fxa/run-fiber!
+                   (fx/try>
+                     (fn []
+                       (while @running
+                         (try
+                           (fx/run-sync! (maintenance-task> days-old) ctx)
+                           (catch Throwable t
+                             (println "Worker task error:" (.getMessage t))))
+                         (Thread/sleep (long interval-ms))))
+                     :worker/interrupted)
+                   ctx)]
+     {:running running :fiber fiber})))
 
 (defn stop-worker-loop!
-  "Stops the background worker thread gracefully."
-  [{:keys [running thread]}]
+  "Stops the background worker fiber gracefully."
+  [{:keys [running fiber]}]
   (when running
     (reset! running false))
-  (when (and thread (instance? Thread thread) (.isAlive ^Thread thread))
-    (.interrupt ^Thread thread)
-    (try (.join ^Thread thread 2000) (catch Throwable _ nil))))
+  (when fiber
+    (fxa/interrupt-fiber! fiber :worker-stopped)))
 
 ;; ---------------------------------------------------------------------------
 ;; Worker Layer Definition

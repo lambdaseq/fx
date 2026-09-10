@@ -19,6 +19,14 @@
             </ModuleState>
           </value>
         </entry>
+        <entry key="fx-async">
+          <value>
+            <ModuleState>
+              <option name="buildSystemId" value="CLOJURE_DEPS" />
+              <option name="displayName" value="fx-async" />
+            </ModuleState>
+          </value>
+        </entry>
         <entry key="fx-core">
           <value>
             <ModuleState>

@@ -1,6 +1,6 @@
 {:paths ["src"]
  :deps  {io.github.conjurernix/fx.core {:mvn/version "0.0.1-alpha11"}
-         ring/ring-core                {:mvn/version "1.15.5"}}
+         org.clojure/core.async        {:mvn/version "1.7.701"}}
  :aliases
  {:dev
   {:extra-deps {hashp/hashp {:mvn/version "0.2.2"}}}

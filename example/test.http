@@ -146,6 +146,22 @@ Accept: application/json
 
 ###
 
+### 17. Parallel Batch Import Todos (POST /api/todos/batch-import)
+POST {{host}}/api/todos/batch-import
+Content-Type: application/json
+Accept: application/json
+
+{
+  "concurrency": 4,
+  "todos": [
+    {"title": "Batch item 1", "description": "Imported via fx.async map-par>", "completed": false},
+    {"title": "Batch item 2", "description": "Imported via fx.async map-par>", "completed": true},
+    {"title": "Batch item 3", "description": "Imported via fx.async map-par>", "completed": false}
+  ]
+}
+
+###
+
 ### ===========================================================================
 ### Error Handling, Validation, and Rate Limiting Tests
 ### ===========================================================================

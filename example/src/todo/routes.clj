@@ -158,6 +158,13 @@
     (-> (domain/import-remote-todos> payload)
         (fx-resp/ok>))))
 
+(defn batch-import-todos-handler>
+  "Effect handler for `POST /api/todos/batch-import` using bounded parallel execution."
+  [req]
+  (let [payload (extract-payload req)]
+    (-> (domain/batch-import-todos> payload)
+        (fx-resp/ok>))))
+
 (defn notify-webhook-handler>
   "Effect handler for `POST /api/todos/:id/notify-webhook`."
   [req]
@@ -279,6 +286,10 @@
       {:post {:handler (if create-limiter
                          (wrap-rate-limit import-remote-todos-handler> create-limiter)
                          import-remote-todos-handler>)}}]
+     ["/todos/batch-import"
+      {:post {:handler (if create-limiter
+                         (wrap-rate-limit batch-import-todos-handler> create-limiter)
+                         batch-import-todos-handler>)}}]
      ["/todos/:id"
       {:get    {:handler get-todo-handler>}
        :put    {:handler update-todo-handler>}

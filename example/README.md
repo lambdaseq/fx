@@ -7,6 +7,7 @@ A full-stack functional Clojure REST API demonstrating how to build web services
 - **[fx.ring](https://github.com/conjurernix/fx)**: Declarative Ring HTTP handler wrapping (`wrap-fx`), ambient context injection, and structured failure translation.
 - **[fx.schedule](https://github.com/conjurernix/fx)**: Composable retry policies with exponential backoff & jitter, endpoint rate limiting, and background worker recurrence.
 - **[fx.http-client](https://github.com/conjurernix/fx)**: Declarative outbound HTTP requests, ambient client context resolution, response combinators, and resilient error categorization.
+- **[fx.async](https://github.com/conjurernix/fx)**: Structured concurrency, lightweight fiber supervisor hierarchies, speculative racing, CSP channels, and async coordination primitives.
 - **[fx.observability](https://github.com/conjurernix/fx)**: Zero-dependency contextual structured logging (`fx.observability.log`), distributed tracing & W3C context propagation (`fx.observability.trace`), and concurrent in-memory metrics (`fx.observability.metrics`).
 - **[HoneySQL v2](https://github.com/seancorfield/honeysql)**: Data-driven SQL generation.
 - **[Reitit](https://github.com/metosin/reitit)**: Declarative, data-driven HTTP routing.
@@ -562,3 +563,21 @@ HTTP requests automatically populate log annotations with `:request-id`, `:metho
 
 ### 3. In-Memory Metrics (`fx.observability.metrics`)
 Concurrent, lock-free metrics (`LongAdder`, `DoubleAdder`) record request throughput, latencies, and domain entity counters without external dependencies. The current state is queryable at `GET /api/metrics`.
+
+---
+
+## Standalone Demonstrations
+
+### 1. `fx-async` Structured Concurrency Demo
+Run the comprehensive async demonstration covering parallel mapping, speculative racing, fiber hierarchies, core.async channels, queues, hubs, deferreds, and semaphores:
+
+```bash
+clojure -M:example -m todo.examples.async-demo
+```
+
+### 2. `fx-http-client` Resilient Outbound HTTP Demo
+Run the HTTP client demonstration covering JSON fetching, retry policies, ambient client binding, and trace propagation:
+
+```bash
+clojure -M:example -m todo.examples.http-client-demo
+```

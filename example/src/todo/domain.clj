@@ -10,7 +10,8 @@
             [fx.schedule :as sched]
             [todo.db :as db]
             [todo.resilience :as resilience]
-            [todo.schema :as schema])
+            [todo.schema :as schema]
+            [todo.worker :as worker])
   (:import (java.time Instant)))
 
 ;; ---------------------------------------------------------------------------
@@ -164,6 +165,25 @@
                                                                    :todos          inserted-todos}))))))))
                                (log/log-info> "Remote todos imported" {:url url})))))
          (metrics/track-success-count> (metrics/metric-counter "todo.imported.total")))))
+
+(defn batch-import-todos>
+  "Batch imports a collection of todo items in parallel using `todo.worker/parallel-import-todos>`.
+   Accepts either a vector of todo maps or a map `{:todos [...] :concurrency n}`.
+   Executes concurrent batch insertions with bounded concurrency."
+  [payload]
+  (let [items       (cond (sequential? payload) payload
+                          (sequential? (:todos payload)) (:todos payload)
+                          :else [])
+        concurrency (or (:concurrency payload) 4)]
+    (trace/with-span> "todo.batch-import" {:count (count items) :concurrency concurrency}
+      (->> (if (empty? items)
+             (fx/succeed> {:imported-count 0 :todos []})
+             (-> (worker/parallel-import-todos> items concurrency)
+                 (fx/map> (fn [inserted]
+                            {:imported-count (count inserted)
+                             :todos          inserted}))
+                 (log/log-info> "Parallel batch todos imported" {:count (count items)})))
+           (metrics/track-success-count> (metrics/metric-counter "todo.batch-imported.total"))))))
 
 (defn notify-webhook>
   "Fetches a todo by `id` and dispatches a JSON notification payload to `webhook-url`.
