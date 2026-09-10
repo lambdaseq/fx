@@ -3,9 +3,12 @@
             [fx.jdbc :as fx-jdbc]
             [fx.observability.metrics :as metrics]
             [fx.observability.trace :as trace]
+            [fx.schedule :as sched]
             [honey.sql :as sql]
-            [next.jdbc :as jdbc])
-  (:import (javax.sql DataSource)
+            [next.jdbc :as jdbc]
+            [todo.resilience :as resilience])
+  (:import (java.time Duration Instant)
+           (javax.sql DataSource)
            (org.sqlite SQLiteDataSource)))
 
 ;; ---------------------------------------------------------------------------
@@ -152,6 +155,7 @@
      (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "query-todos"})
        (-> (fx-jdbc/execute!> (sql/format (sql-select-all completed-filter))
                               {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+           (sched/retry-schedule> resilience/db-retry-policy)
            (fx/map> (fn [rows] (mapv row->todo rows))))))))
 
 (defn query-todo-by-id>
@@ -161,6 +165,7 @@
     (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "query-by-id"})
       (-> (fx-jdbc/execute-one!> (sql/format (sql-select-by-id id))
                                  {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+          (sched/retry-schedule> resilience/db-retry-policy)
           (fx/map> row->todo)))))
 
 (defn insert-todo!>
@@ -168,9 +173,10 @@
   [todo-map]
   (trace/with-span> "db.insert-todo"
     (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "insert-todo"})
-      (-> (fx-jdbc/execute-one!> (sql/format (sql-insert-todo todo-map))
-                                 {:return-keys true
-                                  :builder-fn  fx-jdbc/as-unqualified-kebab-maps})
+      (-> (-> (fx-jdbc/execute-one!> (sql/format (sql-insert-todo todo-map))
+                                     {:return-keys true
+                                      :builder-fn  fx-jdbc/as-unqualified-kebab-maps})
+              (sched/retry-schedule> resilience/db-retry-policy))
           (fx/mapcat> (fn [res]
                         (let [id (or (:id res)
                                      (:last-insert-rowid res)
@@ -183,8 +189,9 @@
   [id updates]
   (trace/with-span> "db.update-todo" {:id id}
     (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "update-todo"})
-      (-> (fx-jdbc/execute-one!> (sql/format (sql-update-todo id updates))
-                                 {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+      (-> (-> (fx-jdbc/execute-one!> (sql/format (sql-update-todo id updates))
+                                     {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+              (sched/retry-schedule> resilience/db-retry-policy))
           (fx/mapcat> (fn [_]
                         (query-todo-by-id> id)))))))
 
@@ -193,8 +200,9 @@
   [id updated-at]
   (trace/with-span> "db.toggle-todo" {:id id}
     (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "toggle-todo"})
-      (-> (fx-jdbc/execute-one!> (sql/format (sql-toggle-todo id updated-at))
-                                 {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+      (-> (-> (fx-jdbc/execute-one!> (sql/format (sql-toggle-todo id updated-at))
+                                     {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+              (sched/retry-schedule> resilience/db-retry-policy))
           (fx/mapcat> (fn [_]
                         (query-todo-by-id> id)))))))
 
@@ -203,5 +211,28 @@
   [id]
   (trace/with-span> "db.delete-todo" {:id id}
     (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "delete-todo"})
-      (fx-jdbc/execute-one!> (sql/format (sql-delete-todo id))
-                             {:builder-fn fx-jdbc/as-unqualified-kebab-maps}))))
+      (-> (fx-jdbc/execute-one!> (sql/format (sql-delete-todo id))
+                                 {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+          (sched/retry-schedule> resilience/db-retry-policy)))))
+
+(defn sql-delete-old-completed-todos
+  [cutoff-instant-str]
+  {:delete-from :todos
+   :where [:and
+           [:= :completed 1]
+           [:<= :updated_at cutoff-instant-str]]})
+
+(defn cleanup-old-completed-todos!>
+  "Deletes completed todos updated prior to `cutoff` (days count or ISO-8601 string).
+   Returns the query result."
+  ([]
+   (cleanup-old-completed-todos!> 30))
+  ([days-or-cutoff]
+   (let [cutoff-str (if (number? days-or-cutoff)
+                      (str (.minus (Instant/now) (Duration/ofDays (long days-or-cutoff))))
+                      (str days-or-cutoff))]
+     (trace/with-span> "db.cleanup-old-completed-todos" {:cutoff cutoff-str}
+       (metrics/track-duration> (metrics/metric-timer "db.query.duration" {:operation "cleanup-completed-todos"})
+         (-> (fx-jdbc/execute-one!> (sql/format (sql-delete-old-completed-todos cutoff-str))
+                                    {:builder-fn fx-jdbc/as-unqualified-kebab-maps})
+             (sched/retry-schedule> resilience/db-retry-policy)))))))

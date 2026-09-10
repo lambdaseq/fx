@@ -51,6 +51,14 @@
             </ModuleState>
           </value>
         </entry>
+        <entry key="fx-schedule">
+          <value>
+            <ModuleState>
+              <option name="buildSystemId" value="CLOJURE_DEPS" />
+              <option name="displayName" value="fx-schedule" />
+            </ModuleState>
+          </value>
+        </entry>
         <entry key="fx-typed">
           <value>
             <ModuleState>

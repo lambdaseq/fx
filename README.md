@@ -13,6 +13,7 @@ A lightweight, purely functional, and modular effect system for Clojure and Cloj
 | Module | Coordinate | Description | Documentation |
 |---|---|---|---|
 | **[`fx.core`](modules/fx-core)** | `io.github.conjurernix/fx.core` | Foundational effect runtime, AST records, standard combinators, failure channels, context DI, composable lifecycle layers (`fx.layer`), and metaprogramming (`fx.utils`). | [Read Core Docs →](modules/fx-core/README.md) |
+| **[`fx.schedule`](modules/fx-schedule)** | `io.github.conjurernix/fx.schedule` | Composable schedules, recurrence policies, retry combinators, and resilience primitives (circuit breaker, rate limiter). | [Read Schedule Docs →](modules/fx-schedule/README.md) |
 | **[`fx.observability`](modules/fx-observability)** | `io.github.conjurernix/fx.observability` | Zero-dependency contextual structured logging (`fx.observability.log`), distributed tracing spans & W3C headers (`fx.observability.trace`), concurrent in-memory metrics (`fx.observability.metrics`), typed Cause failure diagnostics (`fx.observability.diagnostics`), and telemetry event taps (`fx.observability.telemetry`). | [Read Observability Docs →](modules/fx-observability/README.md) |
 | **[`fx.typed`](modules/fx-typed)** | `io.github.conjurernix/fx.typed` | Typed Clojure annotations with full variance tracking across input, output, failure, and context channels. | [Read Typed Docs →](modules/fx-typed/README.md) |
 | **[`fx.jdbc`](modules/fx-jdbc)** | `io.github.conjurernix/fx.jdbc` | Functional JDBC database access and connection pooling with automatic dual-failure transaction rollback semantics. | [Read JDBC Docs →](modules/fx-jdbc/README.md) |
@@ -78,7 +79,31 @@ The core module provides the primitives to build, compose, and execute pure effe
 
 ---
 
-### 2. `fx.typed` — Static Typing with Typed Clojure
+### 2. `fx.schedule` — Schedules, Recurrence & Resilience
+
+`fx.schedule` provides pure, composable schedule state machines for retry strategies, recurrence policies, circuit breakers, and token-bucket rate limiters.
+
+```clojure
+(ns example.resilience
+  (:require [fx.core :as fx]
+            [fx.schedule :as sched]))
+
+(def retry-policy
+  (-> (sched/exponential-backoff> {:initial-ms 100 :factor 2.0 :max-ms 5000})
+      (sched/jitter> 0.1)
+      (sched/intersect> (sched/recur-n> 5))
+      (sched/while-tag> :network/timeout)))
+
+(defn fetch-resilient-data> [url]
+  (-> (http-get> url)
+      (sched/retry-schedule> retry-policy)))
+```
+
+👉 **[Detailed `fx.schedule` Documentation & API Reference →](modules/fx-schedule/README.md)**
+
+---
+
+### 3. `fx.typed` — Static Typing with Typed Clojure
 
 `fx.typed` provides full type annotations for Typed Clojure, modeling effects as a 4-parameter type constructor `(fx/IEffect In Out Failure Context)` with rigorous variance guarantees.
 
@@ -103,7 +128,7 @@ The core module provides the primitives to build, compose, and execute pure effe
 
 ---
 
-### 3. `fx.jdbc` — Purely Functional Database Access
+### 4. `fx.jdbc` — Purely Functional Database Access
 
 `fx.jdbc` bridges relational database operations into effect pipelines using `next.jdbc`. It provides automatic connection pooling, statement caching, streaming reductions with `plan!>`, and atomic transactions that automatically roll back on exceptions or functional `IFailure` values.
 
@@ -130,7 +155,7 @@ The core module provides the primitives to build, compose, and execute pure effe
 
 ---
 
-### 4. `fx.ring` — Declarative Ring Web Services
+### 5. `fx.ring` — Declarative Ring Web Services
 
 `fx.ring` integrates pure effect pipelines into Ring HTTP servers. It translates effect handlers (`req -> effect`) into 1-arity synchronous or 3-arity asynchronous Ring handlers, binds incoming requests to ambient context, and automatically maps failure channels into appropriate HTTP status responses.
 
@@ -154,7 +179,7 @@ The core module provides the primitives to build, compose, and execute pure effe
 
 ---
 
-### 5. `fx.observability` — Contextual Observability, Tracing & Metrics
+### 6. `fx.observability` — Contextual Observability, Tracing & Metrics
 
 `fx.observability` provides zero-dependency structured logging, distributed tracing spans with W3C `traceparent` headers, concurrent in-memory metrics, typed Cause algebra diagnostics, and telemetry taps.
 
@@ -188,8 +213,11 @@ Add the necessary modules to your `deps.edn`:
  {;; Foundational effect system
   io.github.conjurernix/fx.core          {:mvn/version "0.0.1-alpha"}
 
+  ;; Composable schedules & resilience (retries, rate limiting, circuit breaker)
+  io.github.conjurernix/fx.schedule      {:mvn/version "0.0.1-alpha"}
+
   ;; Zero-dependency observability (logging, tracing, metrics, diagnostics)
-  io.github.conjurernix/fx.observability   {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.observability {:mvn/version "0.0.1-alpha"}
 
   ;; Optional Typed Clojure support
   io.github.conjurernix/fx.typed         {:mvn/version "0.0.1-alpha"}

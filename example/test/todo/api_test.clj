@@ -5,6 +5,7 @@
             [muuntaja.core :as m]
             [todo.db :as db]
             [todo.domain :as domain]
+            [todo.resilience :as resilience]
             [todo.routes :as routes])
   (:import (java.util UUID)))
 
@@ -257,3 +258,19 @@
         (is (>= (get-counter :http.server.requests.total) 1))
         (is (>= (get-timer-count :http.server.requests.duration) 3))
         (is (pos? (get-timer-count :db.query.duration)))))))
+
+(deftest test-rate-limiting
+  (let [url (test-db-url)
+        ds (db/create-datasource url)
+        _ (fx/run-sync! (db/init-db!> ds))
+        limiter (resilience/create-todo-rate-limiter {:limit 2 :interval-ms 10000})
+        app (routes/create-app {:fx.jdbc/datasource ds
+                                :todo/rate-limiter   limiter})]
+    (testing "POST /api/todos respects token bucket rate limiter and returns 429 when exhausted"
+      (let [resp1 (request app :post "/api/todos" {:title "Allowed Todo 1"})
+            resp2 (request app :post "/api/todos" {:title "Allowed Todo 2"})
+            resp3 (request app :post "/api/todos" {:title "Blocked Todo 3"})]
+        (is (= 201 (:status resp1)))
+        (is (= 201 (:status resp2)))
+        (is (= 429 (:status resp3)))
+        (is (= "Too Many Requests" (get-in resp3 [:body :error])))))))

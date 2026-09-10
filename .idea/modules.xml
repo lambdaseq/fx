@@ -8,6 +8,7 @@
       <module fileurl="file://$PROJECT_DIR$/modules/fx-jdbc/fx-jdbc.iml" filepath="$PROJECT_DIR$/modules/fx-jdbc/fx-jdbc.iml" />
       <module fileurl="file://$PROJECT_DIR$/modules/fx-observability/fx-observability.iml" filepath="$PROJECT_DIR$/modules/fx-observability/fx-observability.iml" />
       <module fileurl="file://$PROJECT_DIR$/modules/fx-ring/fx-ring.iml" filepath="$PROJECT_DIR$/modules/fx-ring/fx-ring.iml" />
+      <module fileurl="file://$PROJECT_DIR$/modules/fx-schedule/fx-schedule.iml" filepath="$PROJECT_DIR$/modules/fx-schedule/fx-schedule.iml" />
       <module fileurl="file://$PROJECT_DIR$/modules/fx-typed/fx-typed.iml" filepath="$PROJECT_DIR$/modules/fx-typed/fx-typed.iml" />
     </modules>
   </component>

@@ -120,8 +120,20 @@ traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
 ###
 
 ### ===========================================================================
-### Error Handling & Validation Tests
+### Error Handling, Validation, and Rate Limiting Tests
 ### ===========================================================================
+
+### Error: Rate Limiter Quota Test (Burst Requests to POST /api/todos)
+POST {{host}}/api/todos
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Burst Request Item",
+  "description": "Send multiple rapid requests to trigger HTTP 429 Too Many Requests"
+}
+
+###
 
 ### Error: Validation Error - Missing/Empty Title (400 Bad Request)
 POST {{host}}/api/todos

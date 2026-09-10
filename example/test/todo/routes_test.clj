@@ -38,6 +38,20 @@
       (is (= {:error "Bad Request" :details {:message "Title cannot be blank" :field :title}}
              (:body resp)))))
 
+  (testing ":rate-limiter/exceeded maps to 429 response"
+    (let [handler (get routes/failure-map :rate-limiter/exceeded)
+          resp (handler {:message "Rate limit exceeded" :retry-after-ms 1000})]
+      (is (= 429 (:status resp)))
+      (is (= {:error "Too Many Requests" :details {:message "Rate limit exceeded" :retry-after-ms 1000}}
+             (:body resp)))))
+
+  (testing ":circuit-breaker/open maps to 503 response"
+    (let [handler (get routes/failure-map :circuit-breaker/open)
+          resp (handler {:message "Service circuit breaker open"})]
+      (is (= 503 (:status resp)))
+      (is (= {:error "Service Unavailable" :details {:message "Service circuit breaker open"}}
+             (:body resp)))))
+
   (testing ":jdbc/error maps to 500 response"
     (let [handler (get routes/failure-map :jdbc/error)
           resp (handler {:message "Table locked" :sqlstate "HY000"})]

@@ -10,10 +10,11 @@
    :typed         {:lib 'io.github.conjurernix/fx.typed         :dir "modules/fx-typed"         :description "Typed Clojure annotations for fx effect system"}
    :jdbc          {:lib 'io.github.conjurernix/fx.jdbc          :dir "modules/fx-jdbc"          :description "Effectful, purely functional JDBC database access for fx"}
    :ring          {:lib 'io.github.conjurernix/fx.ring          :dir "modules/fx-ring"          :description "Ring HTTP middleware and response combinators for fx"}
-   :observability {:lib 'io.github.conjurernix/fx.observability :dir "modules/fx-observability" :description "Structured logging, distributed tracing, in-memory metrics, and diagnostics for fx"}})
+   :observability {:lib 'io.github.conjurernix/fx.observability :dir "modules/fx-observability" :description "Structured logging, distributed tracing, in-memory metrics, and diagnostics for fx"}
+   :schedule      {:lib 'io.github.conjurernix/fx.schedule      :dir "modules/fx-schedule"      :description "Composable schedules, recurrence policies, retries, and resilience primitives for fx"}})
 
 (def default-all-modules
-  ["modules/fx-core" "modules/fx-typed" "modules/fx-jdbc" "modules/fx-ring" "modules/fx-observability"])
+  ["modules/fx-core" "modules/fx-typed" "modules/fx-jdbc" "modules/fx-ring" "modules/fx-observability" "modules/fx-schedule"])
 
 (def internal-libs
   (into #{} (map :lib (vals lib-modules))))
@@ -23,7 +24,8 @@
    'fx/typed         'io.github.conjurernix/fx.typed
    'fx/jdbc          'io.github.conjurernix/fx.jdbc
    'fx/ring          'io.github.conjurernix/fx.ring
-   'fx/observability 'io.github.conjurernix/fx.observability})
+   'fx/observability 'io.github.conjurernix/fx.observability
+   'fx/schedule      'io.github.conjurernix/fx.schedule})
 
 (defn compute-version
   "Derives version from options or git tags.
@@ -132,7 +134,8 @@
                                "-d" "modules/fx-typed/test"
                                "-d" "modules/fx-jdbc/test"
                                "-d" "modules/fx-ring/test"
-                               "-d" "modules/fx-observability/test"]})
+                               "-d" "modules/fx-observability/test"
+                               "-d" "modules/fx-schedule/test"]})
         {:keys [exit]} (b/process cmds)]
     (when-not (zero? exit)
       (throw (ex-info "Tests failed" {:exit exit}))))

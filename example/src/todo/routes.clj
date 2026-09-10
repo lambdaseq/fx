@@ -6,10 +6,12 @@
             [fx.observability.trace :as trace]
             [fx.ring :as fx-ring]
             [fx.ring.response :as fx-resp]
+            [fx.schedule :as sched]
             [muuntaja.middleware :as muuntaja-middleware]
             [reitit.ring :as ring]
             [ring.middleware.params :as params-middleware]
             [todo.domain :as domain]
+            [todo.resilience :as resilience]
             [todo.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
@@ -28,6 +30,18 @@
      {:status 400
       :body   {:error   "Bad Request"
                :details err}})
+
+   :rate-limiter/exceeded
+   (fn [err]
+     {:status 429
+      :body   {:error   "Too Many Requests"
+               :details (or err "Rate limit quota exceeded")}})
+
+   :circuit-breaker/open
+   (fn [err]
+     {:status 503
+      :body   {:error   "Service Unavailable"
+               :details (or err "Circuit breaker is open")}})
 
    :fx.jdbc/error
    (fn [err]
@@ -170,6 +184,15 @@
                (metrics/track-success-count> (metrics/metric-counter "http.server.requests.total" {:method method}))
                (metrics/track-failure-count> (metrics/metric-counter "http.server.requests.failed" {:method method}))))))))
 
+(defn wrap-rate-limit
+  "Wraps an effect handler with rate limiting using `fx.schedule/rate-limiter>`."
+  [handler limiter]
+  (fn [req]
+    (let [res (handler req)]
+      (if-not (fx/effect? res)
+        res
+        (sched/rate-limiter> res limiter)))))
+
 (defn wrap-observability
   "Composite observability middleware combining trace context, log annotations, execution span, and metrics."
   [handler]
@@ -184,38 +207,45 @@
 ;; ---------------------------------------------------------------------------
 
 (defn create-routes
-  "Defines the Reitit route structure for the Todo API."
-  []
-  [["/api"
-    ["/metrics"
-     {:get {:handler metrics-handler>}}]
-    ["/todos"
-     {:get  {:handler list-todos-handler>}
-      :post {:handler create-todo-handler>}}]
-    ["/todos/:id"
-     {:get    {:handler get-todo-handler>}
-      :put    {:handler update-todo-handler>}
-      :delete {:handler delete-todo-handler>}}]
-    ["/todos/:id/toggle"
-     {:patch {:handler toggle-todo-handler>}}]]])
+  "Defines the Reitit route structure for the Todo API.
+   Optionally accepts a rate limiter instance for write endpoints."
+  ([]
+   (create-routes (resilience/create-todo-rate-limiter)))
+  ([create-limiter]
+   [["/api"
+     ["/metrics"
+      {:get {:handler metrics-handler>}}]
+     ["/todos"
+      {:get  {:handler list-todos-handler>}
+       :post {:handler (if create-limiter
+                         (wrap-rate-limit create-todo-handler> create-limiter)
+                         create-todo-handler>)}}]
+     ["/todos/:id"
+      {:get    {:handler get-todo-handler>}
+       :put    {:handler update-todo-handler>}
+       :delete {:handler delete-todo-handler>}}]
+     ["/todos/:id/toggle"
+      {:patch {:handler toggle-todo-handler>}}]]]))
 
 (defn create-app
   "Constructs the complete Ring application with routing, query params parsing,
    observability, and Muuntaja JSON formatting middleware.
-   Optionally accepts an ambient context map to inject via `fx-ring/wrap-fx-context`."
+   Optionally accepts an ambient context map or options to inject via `fx-ring/wrap-fx-context`."
   ([]
    (create-app {}))
-  ([ctx]
-   (-> (ring/ring-handler
-         (ring/router (create-routes))
-         (ring/routes
-           (ring/create-resource-handler {:path "/"})
-           (ring/create-default-handler
-             {:not-found          (constantly {:status 404 :body {:error "Route not found"}})
-              :method-not-allowed (constantly {:status 405 :body {:error "Method not allowed"}})})))
-       (wrap-observability)
-       (fx-ring/wrap-fx-runner)
-       (fx-ring/wrap-fx-failures {:failure-map failure-map})
-       (fx-ring/wrap-fx-context ctx)
-       (params-middleware/wrap-params)
-       (muuntaja-middleware/wrap-format))))
+  ([ctx-or-opts]
+   (let [ctx (if (map? ctx-or-opts) ctx-or-opts {})
+         limiter (get ctx :todo/rate-limiter (resilience/create-todo-rate-limiter))]
+     (-> (ring/ring-handler
+           (ring/router (create-routes limiter))
+           (ring/routes
+             (ring/create-resource-handler {:path "/"})
+             (ring/create-default-handler
+               {:not-found          (constantly {:status 404 :body {:error "Route not found"}})
+                :method-not-allowed (constantly {:status 405 :body {:error "Method not allowed"}})})))
+         (wrap-observability)
+         (fx-ring/wrap-fx-runner)
+         (fx-ring/wrap-fx-failures {:failure-map failure-map})
+         (fx-ring/wrap-fx-context ctx)
+         (params-middleware/wrap-params)
+         (muuntaja-middleware/wrap-format)))))

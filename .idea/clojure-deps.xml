@@ -40,6 +40,10 @@
           <option name="type" value="TEST_SOURCE" />
         </FolderState>
         <FolderState>
+          <option name="dirUrl" value="file://$PROJECT_DIR$/modules/fx-schedule/test" />
+          <option name="type" value="TEST_SOURCE" />
+        </FolderState>
+        <FolderState>
           <option name="dirUrl" value="file://$PROJECT_DIR$/modules/fx-typed/test" />
           <option name="type" value="TEST_SOURCE" />
         </FolderState>

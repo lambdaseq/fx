@@ -6,7 +6,8 @@
             [fx.observability.metrics :as metrics]
             [ring.adapter.jetty :as jetty]
             [todo.db :as db]
-            [todo.routes :as routes])
+            [todo.routes :as routes]
+            [todo.worker :as worker])
   (:gen-class)
   (:import (java.io Closeable)
            (org.eclipse.jetty.server Server)))
@@ -65,7 +66,7 @@
            (log/log-info> "HTTP server layer stopped"))))))
 
 (defn app-layer>
-  "Composes datasource, metrics registry, and HTTP server layers into a complete application system layer."
+  "Composes datasource, metrics registry, worker, and HTTP server layers into a complete application system layer."
   ([]
    (app-layer> {}))
   ([opts]
@@ -73,10 +74,12 @@
                   (when-let [env-port (System/getenv "PORT")]
                     (try (Integer/parseInt env-port) (catch Throwable _ nil)))
                   3000)
-         db-spec (or (:db-spec opts) db/default-db-spec)]
+         db-spec (or (:db-spec opts) db/default-db-spec)
+         worker-opts (select-keys opts [:interval-ms :days-old])]
      (fx-layer/compose>
        (metrics-layer>)
        (datasource-layer> db-spec)
+       (worker/worker-layer> worker-opts)
        (http-server-layer> port)))))
 
 ;; ---------------------------------------------------------------------------

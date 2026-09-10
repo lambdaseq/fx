@@ -1,5 +1,5 @@
 {:paths ["src"]
- :deps  {io.github.conjurernix/fx.core {:mvn/version "0.0.1-alpha9"}
+ :deps  {io.github.conjurernix/fx.core {:mvn/version "0.0.1-alpha10"}
          ring/ring-core                {:mvn/version "1.15.5"}}
  :aliases
  {:dev

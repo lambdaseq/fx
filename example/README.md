@@ -5,6 +5,7 @@ A full-stack functional Clojure REST API demonstrating how to build web services
 - **[fx.core](https://github.com/conjurernix/fx)**: Pure effect pipelines, typed failure channels (`IFailure`), and continuation stack runtime.
 - **[fx.jdbc](https://github.com/conjurernix/fx)**: Ambient database connection management and transaction handling.
 - **[fx.ring](https://github.com/conjurernix/fx)**: Declarative Ring HTTP handler wrapping (`wrap-fx`), ambient context injection, and structured failure translation.
+- **[fx.schedule](https://github.com/conjurernix/fx)**: Composable retry policies with exponential backoff & jitter, endpoint rate limiting, and background worker recurrence.
 - **[fx.observability](https://github.com/conjurernix/fx)**: Zero-dependency contextual structured logging (`fx.observability.log`), distributed tracing & W3C context propagation (`fx.observability.trace`), and concurrent in-memory metrics (`fx.observability.metrics`).
 - **[HoneySQL v2](https://github.com/seancorfield/honeysql)**: Data-driven SQL generation.
 - **[Reitit](https://github.com/metosin/reitit)**: Declarative, data-driven HTTP routing.
@@ -60,8 +61,68 @@ A full-stack functional Clojure REST API demonstrating how to build web services
 ### Key Principles
 1. **Pure Effect Pipelines:** Business logic in `todo.domain` is defined as pure effect descriptions composed via combinators (`fx/map>`, `fx/mapcat>`, `fx/fail>`, `fx/succeed>`).
 2. **Ambient Dependency Injection:** Handlers do not hardcode database connections; `fx.jdbc` statement executors resolve `::fx.jdbc/datasource` dynamically from ambient execution context injected by `fx.ring/wrap-fx`.
-3. **Typed Error Channels:** Validation and lookup failures are returned via `fx/fail>` with domain tags (`:todo/invalid-input`, `:todo/not-found`). `fx.ring/wrap-fx` translates these tags into standard HTTP response maps and JSON status codes via `:failure-map`.
-4. **Composable Layer Lifecycles (`fx.layer`):** Datasource and HTTP server acquisition/release lifecycles are defined as pure layers (`datasource-layer>`, `http-server-layer>`, `app-layer>`), providing deterministic reverse-order teardown and JVM shutdown management via `launch-sync!`.
+3. **Typed Error Channels & Resilience:** Validation and lookup failures are returned via `fx/fail>` with domain tags (`:todo/invalid-input`, `:todo/not-found`). Transient errors are retried automatically via `fx.schedule/retry-schedule>`, while rate limiting failures (`:rate-limiter/exceeded`) and circuit breaker trips (`:circuit-breaker/open`) map to HTTP 429 and 503 status codes in `todo.routes/failure-map`.
+4. **Composable Layer Lifecycles (`fx.layer`):** Datasource, HTTP server, metrics registry, and background maintenance worker lifecycles are defined as pure layers (`datasource-layer>`, `http-server-layer>`, `worker-layer>`, `app-layer>`), providing deterministic reverse-order teardown and zero thread leakage.
+
+---
+
+## Resilience & Background Workers (`fx.schedule`)
+
+The application integrates the `fx.schedule` resilience algebra for production-grade robustness:
+
+```
+                          +-------------------------------+
+                          |   POST /api/todos Request     |
+                          +---------------+---------------+
+                                          |
+                                          v
+                          +-------------------------------+
+                          |     Token-Bucket Rate Limiter |
+                          |  (10 req/s with burst budget) |
+                          +-------+---------------+-------+
+                                  |               |
+                         Allowed  |               | Exceeded
+                                  v               v
+                   +--------------------+   +--------------------+
+                   | create-todo-handler|   | HTTP 429 Error     |
+                   | (Execute Pipeline) |   | (Too Many Requests)|
+                   +----------+---------+   +--------------------+
+                              |
+                              v
+                   +--------------------+
+                   | db-retry-policy    |
+                   | (Exp Backoff +     |
+                   |  Jitter, 3 retries)|
+                   +----------+---------+
+                              |
+                              v
+                   +--------------------+
+                   | SQLite Database    |
+                   +--------------------+
+```
+
+### 1. Database Retry Policies (`todo.resilience`)
+All critical database queries and mutations in `todo.db` wrap their operations with `db-retry-policy`:
+```clojure
+(def db-retry-policy
+  (-> (sched/exponential-backoff> {:initial-ms 50 :factor 2.0 :max-ms 1000})
+      (sched/jitter> 0.1)
+      (sched/intersect> (sched/recur-n> 3))
+      (sched/while-tag> #{:fx.jdbc/error :jdbc/error :db/busy :sqlite/busy})))
+```
+If an intermittent lock or busy error occurs, the operation is retried with randomized exponential backoff up to 3 times before returning a structured error.
+
+### 2. Route Rate Limiting (`todo.routes`)
+Write endpoints (such as `POST /api/todos`) are protected against bursts and traffic spikes using an in-memory token-bucket rate limiter:
+```clojure
+(wrap-rate-limit create-todo-handler> rate-limiter)
+```
+When token capacity is exhausted, the handler fast-fails with `:rate-limiter/exceeded`, which translates into HTTP `429 Too Many Requests`.
+
+### 3. Background Maintenance Worker (`todo.worker`)
+Automated maintenance (such as pruning completed todos older than 30 days and incrementing maintenance run metrics) runs periodically in the background:
+- Managed as an `fx.layer` (`worker-layer>`) wired into `todo.main/app-layer>`.
+- Starts a background daemon thread on system boot and terminates cleanly with zero thread leakage when the system shuts down.
 
 ---
 
@@ -74,18 +135,22 @@ example/
 ├── test.http            # Interactive HTTP requests for IntelliJ / REST Client
 ├── src/
 │   └── todo/
-│       ├── db.clj       # SQLite datasource, DDL, and HoneySQL queries
-│       ├── domain.clj   # Pure business logic & effect pipelines
-│       ├── routes.clj   # Reitit router, fx.ring wrapping, & failure map
-│       ├── schema.clj   # Malli schemas, data coercion, & validation
-│       └── main.clj     # Server lifecycle (start-server!, stop-server!, -main)
+│       ├── db.clj          # SQLite datasource, DDL, and HoneySQL queries with retries
+│       ├── domain.clj      # Pure business logic & effect pipelines
+│       ├── resilience.clj  # Retry policies, rate limiters, & failure filters
+│       ├── routes.clj      # Reitit router, fx.ring wrapping, rate limiting, & failure map
+│       ├── schema.clj      # Malli schemas, data coercion, & validation
+│       ├── worker.clj      # Background recurring maintenance worker layer
+│       └── main.clj        # Server lifecycle (start-server!, stop-server!, -main)
 └── test/
     └── todo/
-        ├── api_test.clj    # Integration tests for HTTP endpoints & fx pipelines
-        ├── db_test.clj     # Tests for database queries, HoneySQL, AST, and context DI
-        ├── domain_test.clj # Tests for validation short-circuiting, effect mocking, & domain logic
-        ├── routes_test.clj # Tests for route effect handlers & failure translation map
-        └── schema_test.clj # Tests for Malli schemas, coercion, and validation errors
+        ├── api_test.clj        # Integration tests for HTTP endpoints, rate limiting, & fx pipelines
+        ├── db_test.clj         # Tests for database queries, HoneySQL, AST, and context DI
+        ├── domain_test.clj     # Tests for validation short-circuiting, effect mocking, & domain logic
+        ├── resilience_test.clj # Tests for retry policies, backoff steps, & rate limiters
+        ├── routes_test.clj     # Tests for route effect handlers & failure translation map
+        ├── schema_test.clj     # Tests for Malli schemas, coercion, and validation errors
+        └── worker_test.clj     # Tests for background worker recurrence and layer lifecycle
 ```
 
 ---
@@ -348,6 +413,24 @@ You can interactively develop and test effects and system layers from the Clojur
     "details": {
       "message": "Todo not found with id 999",
       "id": 999
+    }
+  }
+  ```
+- **Rate Limit Exceeded Error (`429 Too Many Requests`):**
+  ```json
+  {
+    "error": "Too Many Requests",
+    "details": {
+      "message": "Rate limit quota exceeded"
+    }
+  }
+  ```
+- **Circuit Breaker Open Error (`503 Service Unavailable`):**
+  ```json
+  {
+    "error": "Service Unavailable",
+    "details": {
+      "message": "Downstream dependency circuit breaker is open"
     }
   }
   ```
