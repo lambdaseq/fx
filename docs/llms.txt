@@ -1,0 +1,177 @@
+# fx: Functional Effect System for Clojure & ClojureScript
+
+> `fx` is a lightweight, purely functional, and modular effect system for Clojure and ClojureScript inspired by Effect-ts and ZIO. It models synchronous and asynchronous computations, resource lifecycles, dependency injection, and typed failure channels as 100% transparent data structures (AST records) composed with standard Clojure threading (`->`).
+
+---
+
+## Core Philosophy & Design Principles
+
+1. **Programs as Data (Transparent AST):** Every effect node is an immutable Clojure `defrecord` implementing `ITagged` and `IEffect`. Workflows are inert blueprints that can be inspected, traversed, rewritten, or mocked prior to execution.
+2. **Execution at the Edge:** Business logic remains purely descriptive and side-effect free until explicitly evaluated at application boundaries via `fx/run-sync!` or `fx/run-async!`.
+3. **Deterministic Monomorphic Contracts:** Strict segregation of pure transformation functions `(a -> b)` and `Effect` records `(fx/IEffect)`. Zero dynamic coercion or polymorphic runtime dispatch.
+4. **Canonical Suffix Conventions:**
+   - Effect constructors, combinators, and pipeline transforms end with `>` (e.g., `succeed>`, `fail>`, `map>`, `acquire-release>`).
+   - Execution runners that trigger evaluation end with `!` (e.g., `run-sync!`, `run-async!`).
+   - Pure boolean predicates end with `?` (e.g., `effect?`, `failure?`).
+5. **Dual-Channel Execution (Success vs. Failure):** Computations yield either a successful value or a structured `Failure` record holding a `:tag` and `:error-data`. Failures automatically short-circuit downstream steps (`map>`, `mapcat>`) and route to recovery handlers (`catch>`, `or-else>`).
+6. **Stack-Safe Continuation Interpreter:** Pipelines execute in constant $O(1)$ JVM/JS stack space via a heap-allocated continuation stack (`IContinuation`), completely preventing `StackOverflowError`.
+7. **Pure Context & Dependency Injection:** Environmental services are passed as immutable context maps across synchronous and asynchronous boundaries (`CompletableFuture` / `Promise`) without dynamic var bindings (`*context*`).
+
+---
+
+## Installation & Coordinates
+
+Add the desired modules to your `deps.edn`:
+
+```clojure
+{:deps
+ {;; Foundational effect runtime, DI, layers, and metaprogramming
+  io.github.conjurernix/fx.core          {:mvn/version "0.0.1-alpha"}
+
+  ;; Structured concurrency, fibers, parallel combinators, and CSP channels
+  io.github.conjurernix/fx.async         {:mvn/version "0.0.1-alpha"}
+
+  ;; Composable schedules, retry strategies, circuit breakers, rate limiters
+  io.github.conjurernix/fx.schedule      {:mvn/version "0.0.1-alpha9"}
+
+  ;; Zero-dependency logging, distributed tracing, metrics, diagnostics
+  io.github.conjurernix/fx.observability {:mvn/version "0.0.1-alpha6"}
+
+  ;; Declarative HTTP client effects on Java 11 / Hato
+  io.github.conjurernix/fx.http-client   {:mvn/version "0.0.1-alpha"}
+
+  ;; Functional JDBC database access, connection pooling, and transactions
+  io.github.conjurernix/fx.jdbc          {:mvn/version "0.0.1-alpha"}
+
+  ;; Ring web handler adapters, failure resolution, and response builders
+  io.github.conjurernix/fx.ring          {:mvn/version "0.0.1-alpha"}
+
+  ;; Static type annotations for Typed Clojure
+  io.github.conjurernix/fx.typed         {:mvn/version "0.0.1-alpha"}}}
+```
+
+---
+
+## The Suite of Modules
+
+### 1. `fx.core` — Foundational Effect Runtime & Lifecycles
+The core engine providing AST records, primitive combinators, context dependency injection, managed lifecycle layers (`fx.layer`), and pipeline metaprogramming (`fx.utils`).
+
+- **Namespaces:**
+  - `fx.core`: Core effect constructors (`succeed>`, `fail>`), transformations (`map>`, `mapcat>`, `tap>`, `ensure>`), context access (`service>`, `context>`, `provide>`), resource brackets (`acquire-release>`), conditional branches (`if>`, `cond>`), error recovery (`catch>`, `catchall>`, `or-else>`), and runners (`run-sync!`, `run-async!`).
+  - `fx.layer`: Composable dependency injection and resource lifecycle management (`from-value>`, `from-values>`, `from-effect>`, `make>`, `make-map>`, `merge>`, `compose>`, `provide-layer>`, `with-layer>`, `start-layer!`, `stop-layer!`, `launch-sync!`).
+  - `fx.utils`: Pure pipeline inspection, AST traversal, splicing, and higher-order combinators (`chain-length`, `effect-tags`, `replace-by-tag`, `insert-after-tag`, `pipe>`, `comp>`, `pipe-fx-fn>`, `around>`).
+
+### 2. `fx.async` — Structured Concurrency & Coordination
+First-class structured concurrency unifying Java Virtual Threads, JVM thread pools, and `core.async` go-routines under a hierarchical fiber model with cascading cancellation and resource unwinding safety.
+
+- **Namespaces:**
+  - `fx.async`: Lightweight fibers (`fork>`, `join>`, `interrupt>`, `fiber-status>`), parallel combinators (`race>`, `all-par>`, `map-par>`), execution scopes (`with-virtual-threads>`, `with-thread-pool>`, `with-go>`), channel bridging (`chan>`, `chan-put>`, `chan-take>`, `chan-alts>`, `chan-pipe>`), and coordination primitives (`queue-bounded>`, `hub-bounded>`, `deferred>`, `semaphore>`, `with-permit>`, `countdown-latch>`, `ref>`).
+
+### 3. `fx.schedule` — Recurrence, Retries & Resilience
+Pure, composable schedule state machines implementing `ISchedule` for retry policies, recurrence intervals, circuit breakers, and token-bucket rate limiters.
+
+- **Namespaces:**
+  - `fx.schedule`: Schedule constructors (`forever>`, `once>`, `recur-n>`, `fixed>`, `linear-backoff>`, `exponential-backoff>`, `fibonacci-backoff>`, `elapsed>`), combinators (`intersect>`, `union>`, `and-then>`, `jitter>`, `while-tag>`, `until-tag>`), effect integrations (`retry-schedule>`, `repeat-schedule>`), and resilience primitives (`circuit-breaker>`, `rate-limiter>`).
+
+### 4. `fx.http-client` — Purely Functional HTTP Client
+Declarative HTTP client effects built on Hato and Java 11's `java.net.http.HttpClient` with ambient client context resolution, response combinators, and categorized failure modeling.
+
+- **Namespaces:**
+  - `fx.http-client`: Client lifecycle (`build-client>`, `with-client>`), request constructors (`get>`, `post>`, `put>`, `delete>`, `patch>`, `head>`, `options>`, `request>`), response combinators (`body>`, `status>`, `headers>`), and categorized error predicates (`ok?`, `success?`, `client-error?`, `server-error?`, `timeout-error?`, `connection-error?`, `http-error?`).
+
+### 5. `fx.jdbc` — Functional Relational Database Access
+Bridges relational database operations into pure effect pipelines using `next.jdbc`. Features connection scoping, statement preparation, streaming reductions, CRUD combinators, and automatic dual-failure transaction rollbacks.
+
+- **Namespaces:**
+  - `fx.jdbc`: Connection management (`get-datasource>`, `get-connection>`, `with-connection>`, `provide-datasource>`), transactions (`with-transaction>`), query execution (`execute!>`, `execute-one!>`, `plan!>`, `with-prepared-statement>`), and result-set builders (`as-unqualified-kebab-maps`).
+  - `fx.jdbc.sql`: High-level CRUD operations (`insert!>`, `insert-multi!>`, `query!>`, `find-by-keys!>`, `get-by-id!>`, `update!>`, `delete!>`).
+
+### 6. `fx.ring` — Declarative Ring Web Services
+Integrates pure effect pipelines into Ring HTTP servers. Adapts effect handlers `(fn [req] -> effect)` into 1-arity synchronous or 3-arity asynchronous Ring handlers with automatic context injection and 3-tier hybrid failure translation.
+
+- **Namespaces:**
+  - `fx.ring`: Ring middleware adapters (`wrap-fx`, `wrap-fx-runner`, `wrap-fx-failures`, `wrap-fx-context`, `wrap-fx-all`).
+  - `fx.ring.response`: Ring request context access (`request>`) and response builders (`ok>`, `created>`, `bad-request>`, `not-found>`, `internal-server-error>`, `redirect>`, `status>`, `header>`, `content-type>`).
+
+### 7. `fx.observability` — Contextual Observability & Diagnostics
+Zero-dependency observability subsystem passing structured logging metadata, distributed tracing spans with W3C `traceparent` headers, concurrent in-memory metrics, typed Cause failure diagnostics, and telemetry taps through the immutable context map.
+
+- **Namespaces:**
+  - `fx.observability.log`: Structured logging (`log-info>`, `log-error>`, `annotate-logs>`, `with-logger>`).
+  - `fx.observability.trace`: Distributed tracing spans and W3C headers (`with-span>`, `with-span-attributes>`, `extract-trace-context>`, `inject-trace-context>`).
+  - `fx.observability.metrics`: Lock-free atomic counters, gauges, and timers (`metric-counter`, `metric-timer`, `track-duration>`, `track-success-count>`, `metrics-snapshot!`).
+  - `fx.observability.diagnostics`: Typed Cause algebra and ASCII trace visualizers (`sandbox>`, `unsandbox>`, `render-cause`, `render-execution-trace`).
+  - `fx.observability.telemetry`: Non-intrusive event interceptors (`tap-telemetry>`, `with-telemetry-sink>`).
+
+### 8. `fx.typed` — Static Typing with Typed Clojure
+Static type annotations and channel variance tracking for Typed Clojure, modeling effects as a 4-parameter type constructor: `(fx/IEffect In Out Failure Context)`.
+
+- **Namespaces:**
+  - `fx.typed`: Type contracts for protocols (`IEffect`, `IFailure`, `ITagged`), core constructors, combinators, and runners.
+
+---
+
+## Quick Example: Composing the Suite
+
+```clojure
+(ns example.full-stack
+  (:require [fx.core :as fx]
+            [fx.async :as fxa]
+            [fx.http-client :as http]
+            [fx.jdbc :as fx-jdbc]
+            [fx.jdbc.sql :as sql]
+            [fx.observability.log :as log]
+            [fx.observability.trace :as trace]
+            [fx.ring :as fx-ring]
+            [fx.ring.response :as fx-resp]
+            [fx.schedule :as sched]))
+
+;; Outbound HTTP retry policy with exponential backoff & jitter
+(def http-retry-policy
+  (-> (sched/exponential-backoff> {:initial-ms 100 :factor 2.0 :max-ms 3000})
+      (sched/jitter> 0.1)
+      (sched/intersect> (sched/recur-n> 3))
+      (sched/while-tag> #{:http/server-error :http/timeout :http/connection-error})))
+
+;; Pure domain handler: fetches remote items concurrently and stores them in SQLite
+(defn sync-remote-items-handler [req]
+  (-> (log/annotate-logs> {:endpoint "/api/sync"})
+      (trace/with-span> "sync.process"
+        (-> (http/get> "https://api.example.com/items" {:as :json})
+            (sched/retry-schedule> http-retry-policy)
+            (http/body>)
+            (fxa/map-par>
+              (fn [item]
+                (trace/with-span> "sync.persist-item"
+                  (fx-jdbc/with-transaction>
+                    (sql/insert!> :items item))))
+              {:concurrency 4})
+            (fx/map> (fn [persisted] {:synced-count (count persisted)}))
+            (fx-resp/ok>)))))
+
+;; Ring Web Adapter with ambient datasource context and failure translation
+(def app
+  (fx-ring/wrap-fx sync-remote-items-handler
+    {:provider {:fx.jdbc/datasource (fx-jdbc/get-datasource> {:dbtype "sqlite" :dbname "app.db"})}
+     :failure-map {:http/server-error (fn [err _req] {:status 502 :body {:error "Upstream service error" :details err}})}}))
+```
+
+---
+
+## Documentation Index
+
+For complete and exhaustive documentation of all modules, APIs, protocols, architecture diagrams, and end-to-end guides, refer to:
+
+- **Full Documentation & API Reference:** [`docs/llms-full.txt`](llms-full.txt)
+- **Module Specific Documentation:**
+  - Core Runtime & Lifecycles: [`modules/fx-core/README.md`](../modules/fx-core/README.md)
+  - Structured Concurrency & Fibers: [`modules/fx-async/README.md`](../modules/fx-async/README.md)
+  - Schedules & Resilience: [`modules/fx-schedule/README.md`](../modules/fx-schedule/README.md)
+  - HTTP Client: [`modules/fx-http-client/README.md`](../modules/fx-http-client/README.md)
+  - JDBC Database Access: [`modules/fx-jdbc/README.md`](../modules/fx-jdbc/README.md)
+  - Ring HTTP Middleware: [`modules/fx-ring/README.md`](../modules/fx-ring/README.md)
+  - Contextual Observability: [`modules/fx-observability/README.md`](../modules/fx-observability/README.md)
+  - Typed Clojure Annotations: [`modules/fx-typed/README.md`](../modules/fx-typed/README.md)
+  - Architectural Guide: [`doc/intro.md`](../doc/intro.md)
+  - Example Application: [`example/README.md`](../example/README.md)

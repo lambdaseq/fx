@@ -1,0 +1,851 @@
+# fx: Complete Functional Effect System Reference Manual
+
+> **`fx`** is a lightweight, purely functional, and modular effect system for Clojure and ClojureScript inspired by Effect-ts and ZIO.
+> It models synchronous and asynchronous computations, resource lifecycles, dependency injection, and failure channels as pure, 100% transparent data structures (AST records) composed with standard Clojure threading (`->`).
+
+---
+
+## Table of Contents
+
+1. [Architecture & Mental Model](#1-architecture--mental-model)
+   - [Core Philosophy](#core-philosophy)
+   - [Execution Lifecycle & Stack-Safe Interpreter](#execution-lifecycle--stack-safe-interpreter)
+   - [Protocols & Transparent AST Records](#protocols--transparent-ast-records)
+   - [Channel Model: Success vs. Failure](#channel-model-success-vs-failure)
+   - [Context Propagation & Dependency Injection](#context-propagation--dependency-injection)
+   - [Repository Architecture Directives for LLMs](#repository-architecture-directives-for-llms)
+2. [Module Reference: `fx.core`](#2-module-reference-fxcore)
+   - [Core Combinators & Constructors (`fx.core`)](#core-combinators--constructors-fxcore)
+   - [Composable Lifecycle Layers (`fx.layer`)](#composable-lifecycle-layers-fxlayer)
+   - [AST Metaprogramming & Pipeline Rewriting (`fx.utils`)](#ast-metaprogramming--pipeline-rewriting-fxutils)
+3. [Module Reference: `fx.async`](#3-module-reference-fxasync)
+   - [Lightweight Fibers & Structured Lifecycles](#lightweight-fibers--structured-lifecycles)
+   - [Structured Parallel Combinators](#structured-parallel-combinators)
+   - [Execution Engines & Scopes](#execution-engines--scopes)
+   - [CSP Channel Bridging (`core.async`)](#csp-channel-bridging-coreasync)
+   - [Coordination & Synchronization Primitives](#coordination--synchronization-primitives)
+4. [Module Reference: `fx.schedule`](#4-module-reference-fxschedule)
+   - [Schedule Mental Model & `ISchedule` Protocol](#schedule-mental-model--ischedule-protocol)
+   - [Schedule Constructors & Backoff Policies](#schedule-constructors--backoff-policies)
+   - [Schedule Combinators](#schedule-combinators)
+   - [Effect Integrations: Retries & Recurrence](#effect-integrations-retries--recurrence)
+   - [Resilience Primitives: Circuit Breakers & Rate Limiters](#resilience-primitives-circuit-breakers--rate-limiters)
+5. [Module Reference: `fx.http-client`](#5-module-reference-fxhttp-client)
+   - [Client Lifecycle & Context Injection](#client-lifecycle--context-injection)
+   - [HTTP Request Combinators](#http-request-combinators)
+   - [Response Combinators & Error Predicates](#response-combinators--error-predicates)
+6. [Module Reference: `fx.jdbc`](#6-module-reference-fxjdbc)
+   - [Connection & Datasource Management](#connection--datasource-management)
+   - [Transactions & Dual-Failure Rollback Semantics](#transactions--dual-failure-rollback-semantics)
+   - [Statement Execution & Streaming Reductions (`plan!>`)](#statement-execution--streaming-reductions-plan)
+   - [High-Level SQL CRUD Combinators (`fx.jdbc.sql`)](#high-level-sql-crud-combinators-fxjdbcsql)
+7. [Module Reference: `fx.ring`](#7-module-reference-fxring)
+   - [Ring Middleware Adapters](#ring-middleware-adapters)
+   - [3-Tier Hybrid Failure Translation](#3-tier-hybrid-failure-translation)
+   - [Response Constructors & Combinators (`fx.ring.response`)](#response-constructors--combinators-fxringresponse)
+8. [Module Reference: `fx.observability`](#8-module-reference-fxobservability)
+   - [Structured & Contextual Logging (`fx.observability.log`)](#structured--contextual-logging-fxobservabilitylog)
+   - [Distributed Tracing & W3C Spans (`fx.observability.trace`)](#distributed-tracing--w3c-spans-fxobservabilitytrace)
+   - [In-Memory Lock-Free Metrics (`fx.observability.metrics`)](#in-memory-lock-free-metrics-fxobservabilitymetrics)
+   - [Diagnostics & Cause Algebra (`fx.observability.diagnostics`)](#diagnostics--cause-algebra-fxobservabilitydiagnostics)
+   - [Telemetry Event Taps (`fx.observability.telemetry`)](#telemetry-event-taps-fxobservabilitytelemetry)
+9. [Module Reference: `fx.typed`](#9-module-reference-fxtyped)
+   - [Type Constructor & Variance Rules](#type-constructor--variance-rules)
+   - [Annotated Protocols & Core Signatures](#annotated-protocols--core-signatures)
+10. [End-to-End Production Application Architecture](#10-end-to-end-production-application-architecture)
+
+---
+
+## 1. Architecture & Mental Model
+
+### Core Philosophy
+
+Traditional effect libraries in Clojure often encapsulate computations inside nested closures `(fn [env] ...)` that capture state internally. While easy to write, closures become black boxes at runtime: they cannot be inspected, queried, rewritten for testing, or analyzed statically.
+
+`fx` is engineered on four foundational principles:
+1. **100% Transparent Data AST:** Every effect stage is a first-class Clojure `defrecord` implementing `ITagged`, `IEffect`, and Clojure map interfaces. Configuration parameters (functions, retry policies, service keys) are stored as explicit record fields rather than closed over inside functions.
+2. **Deterministic Monomorphic Contracts:** Every combinator strictly separates pure functions `(a -> b)` from `Effect` instances `(fx/IEffect)`. There is zero dynamic coercion (`eval-eff-or-fn`) or runtime reflection overhead.
+3. **Stack-Safe Continuation Interpreter:** Pipelines evaluate within a symmetric protocol-driven interpreter loop in constant $O(1)$ JVM/JS stack space using heap-allocated continuation frames (`IContinuation`), completely preventing `StackOverflowError`.
+4. **Pure Context Threading:** Environmental dependencies and services are passed as pure immutable maps across synchronous and asynchronous execution boundaries (`run-sync!` and `run-async!`) without Clojure dynamic vars (`*context*`).
+
+---
+
+### Execution Lifecycle & Stack-Safe Interpreter
+
+The `fx` execution engine operates as a trampoline stepping forward through effects and resuming backward through continuation stack frames on the heap.
+
+```
+       Step forward: (-step effect val ctx stack)
+     ──────────────────────────────────────────────>
+ AST Nodes                                            Result / Failure
+     <──────────────────────────────────────────────
+       Resume backward: (-resume frame val ctx stack)
+```
+
+1. **Step Phase:** The interpreter invokes `(-step curr-eff curr-val curr-ctx stack)`. If the effect has an upstream dependency (`:prev-effect`), it pushes a continuation frame (`StepEffectFrame`) onto the heap stack and steps to `:prev-effect`.
+2. **Resume Phase:** When a branch finishes (`curr-eff` is `nil`), the interpreter pops the top continuation frame from the stack and calls `(-resume frame curr-val curr-ctx rest-stack)`.
+3. **Completion:** When the stack is empty and `curr-eff` is `nil`, the final value (or unhandled `Failure`) is returned.
+
+---
+
+### Protocols & Transparent AST Records
+
+The runtime is structured around five core protocols in `fx.core`:
+
+```clojure
+(defprotocol ITagged
+  (tag [this] "Returns the keyword tag identifying the AST node."))
+
+(defprotocol IFailure
+  (error-data [this] "Returns the structured error data payload."))
+
+(defprotocol IEffect
+  (prev-effect [this] "Returns upstream effect dependency or nil.")
+  (-step [this value context stack]
+    "Performs one forward execution step, returning:
+     [next-effect next-value next-context next-stack]."))
+
+(defprotocol IContinuation
+  (-resume [this value context stack]
+    "Resumes execution when a sub-computation completes, returning:
+     [next-effect next-value next-context next-stack]."))
+
+(defprotocol IUnwindable
+  (-unwind [this exception rest-stack]
+    "Handles exception unwinding during runtime exceptions, returning:
+     {:effect ... :value ... :context ... :rest-stack ...} or nil."))
+```
+
+---
+
+### Channel Model: Success vs. Failure
+
+Every computation in `fx` evaluates to either:
+- **Success Channel:** Any valid Clojure value (scalars, maps, records, vectors, etc.).
+- **Failure Channel:** An instance of `fx.core.Failure` (implementing `IFailure` and `ITagged`), carrying a `:tag` keyword and `:error-data` payload.
+
+**Automatic Short-Circuiting:** Downstream success combinators (`map>`, `mapcat>`, `tap>`) automatically skip execution when upstream yields a `Failure`. The failure flows unaltered until intercepted by recovery combinators (`catch>`, `catchall>`, `or-else>`) or returned to the caller.
+
+```clojure
+(require '[fx.core :as fx])
+
+;; Successful pipeline
+(-> (fx/succeed> 10)
+    (fx/map> inc)
+    (fx/run-sync!))
+;; => 11
+
+;; Short-circuiting failure pipeline
+(-> (fx/fail> :validation/invalid-email {:email "bad-email"})
+    (fx/map> (fn [_] (println "This will never run!")))
+    (fx/run-sync!))
+;; => #fx.core.Failure{:tag :validation/invalid-email, :error-data {:email "bad-email"}}
+```
+
+---
+
+### Context Propagation & Dependency Injection
+
+Environmental context is passed as an immutable map:
+1. **No Dynamic Vars:** Context does not use `*context*`, eliminating binding penalties and thread-local bleeding.
+2. **Thread-Safe Async:** In `run-async!`, the immutable context map passes directly into Java `CompletableFuture` suppliers or JavaScript `Promise` callbacks.
+3. **Scoped Overrides:** `provide>` and `provide-service>` create localized sub-contexts for child effect trees, restoring the parent context when the child finishes via `RestoreContextFrame`.
+
+---
+
+### Repository Architecture Directives for LLMs
+
+When generating `fx` code, strictly follow these repository directives:
+
+1. **Strict Canonical Naming (No Aliases):**
+   - Every effect combinator, constructor, and runner has exactly one canonical name.
+   - Do NOT define or use aliases (e.g., use `match>` instead of `fold>`, `acquire-release>` instead of `bracket>`, `succeed>` instead of `succeed`).
+2. **Standardized Suffix Conventions:**
+   - Effect constructors, combinators, and transforms MUST end with `>` (e.g., `succeed>`, `fail>`, `map>`, `match>`, `with-connection>`).
+   - Execution runners that evaluate side-effects MUST end with `!` (e.g., `run-sync!`, `run-async!`, `execute!>`).
+   - Standard boolean predicates MUST end with `?` (e.g., `effect?`, `failure?`, `layer?`).
+3. **Deterministic Argument Types (Monomorphic Contracts):**
+   - No dual-mode "callback vs. Effect" argument polymorphism.
+   - If a parameter accepts an `Effect`, pass an explicit `Effect`.
+   - If a parameter accepts a pure function, pass a function.
+   - Do not rely on dynamic runtime coercion helpers (`eval-eff-or-fn`).
+4. **Thread-First Macro Idiom:** Compose effect pipelines with standard Clojure thread-first (`->`) syntax.
+
+---
+
+## 2. Module Reference: `fx.core`
+
+`io.github.conjurernix/fx.core` is the foundational module providing core effect constructors, standard combinators, failure recovery, dependency injection, composable lifecycle layers (`fx.layer`), and AST metaprogramming (`fx.utils`).
+
+### Core Combinators & Constructors (`fx.core`)
+
+| Function | Signature | Description |
+|---|---|---|
+| `succeed>` | `[val]` | Creates a successful effect yielding `val`. |
+| `fail>` | `([failure] [tag data])` | Creates a failed effect holding a typed `Failure` record. |
+| `map>` | `([f] [eff f])` | Transforms successful values with unary function `(f val)`. |
+| `map-ctx>` | `([f] [eff f])` | Transforms successful values with binary function `(f val context)`. |
+| `mapcat>` | `([f] [eff f])` | Flat-maps over an effect with an effect-producing function `(f val) -> Effect`. |
+| `tap>` | `([f] [eff f])` | Executes side-effect `f` on success and passes the value through unchanged. |
+| `tap-error>` | `([f] [eff f])` | Executes side-effect `f` on failure and passes the failure through unchanged. |
+| `do-ctx>` | `([f] [eff f])` | Executes side-effect `(f val context)` and passes value unchanged. |
+| `context>` | `([] [key] [key default])` | Yields the active execution context map or a specific key value. |
+| `service>` | `([key] [key default])` | Extracts a service dependency from the active context. |
+| `provide>` | `([ctx-map] [eff ctx-map] [eff body ctx-map])` | Executes effects within a scoped context map override. |
+| `provide-service>` | `([k v] [eff k v] [k v eff])` | Injects a single service key-value pair into context. |
+| `ensure>` | `([finalizer-eff] [eff finalizer-eff])` | Guaranteed finalizer that executes on success or failure, preserving upstream value. |
+| `acquire-release>` | `([acquire use release] [use release])` | Safe resource bracket: acquires a resource, executes `use`, and guarantees `release`. |
+| `retry>` | `([policy] [eff policy])` | Retries a failed effect according to a retry policy map. |
+| `try>` | `([eff] [eff catch] [prev eff catch])` | Catches thrown exceptions and converts them to typed failures. |
+| `if>` | `([cond-eff then-eff else-eff] ...)` | Branches execution based on a predicate effect. |
+| `cond>` | `([eff & test-expr-pairs])` | Multi-branch conditional evaluating test-expression pairs. |
+| `match>` | `([on-failure on-success] [eff on-failure on-success])` | Pattern-matches on both failure and success channels. |
+| `or-else>` | `([fallback-eff] [eff fallback-eff])` | Recovers from any failure by executing a fallback effect. |
+| `or-else-fail>` | `([failure] [eff failure])` | Replaces any upstream failure with a custom failure descriptor. |
+| `all>` | `[effects]` | Evaluates a vector of independent effects and collects results into a vector. |
+| `zip>` | `[eff-a eff-b]` | Combines two effects into a pair `[val-a val-b]`. |
+| `zip-with>` | `[eff-a eff-b f]` | Combines two effects using a binary combining function `(f a b)`. |
+| `for-each>` | `([f] [coll f])` | Iterates over items applying an effect-producing function `f`. |
+| `catch>` | `([handler-map] [eff handler-map])` | Recovers from specific failures using a `{tag-key handler-eff}` map. |
+| `catchall>` | `([inner-eff] [eff inner-eff])` | Recovers from any failure by passing failure map to `inner-eff`. |
+| `die>` | `([] [msg] [msg data] [eff msg data])` | Terminates execution by throwing an uncatchable exception. |
+| `or-die>` | `([] [on-failure] [eff on-failure])` | Converts failures into fatal uncatchable runtime exceptions. |
+| `sleep>` | `([ms] [eff ms])` | Pauses execution for `ms` milliseconds. |
+| `chain>` | `[prev-eff current-eff]` | Links two effects into a sequential chain. |
+| `run-sync!` | `([eff] [eff context])` | Evaluates an effect pipeline synchronously with optional context. |
+| `run-async!` | `([eff] [eff context])` | Evaluates an effect pipeline asynchronously (`CompletableFuture` on JVM / `js/Promise` on JS). |
+
+#### Usage Examples (`fx.core`)
+
+```clojure
+(ns example.core-demo
+  (:require [fx.core :as fx]))
+
+;; Context injection and failure recovery
+(defn fetch-user-profile [user-id]
+  (-> (fx/service> :user-db)
+      (fx/mapcat> (fn [db]
+                    (if-let [user (get db user-id)]
+                      (fx/succeed> user)
+                      (fx/fail> :user/not-found {:user-id user-id}))))
+      (fx/catch>
+        {:user/not-found (fx/map> (fn [{:keys [user-id]}]
+                                    {:user-id user-id :name "Guest" :role :anonymous}))})))
+
+;; Resource Bracket Safety
+(def read-file-effect
+  (fx/acquire-release>
+    (fx/try> (fn [] (clojure.java.io/reader "/tmp/data.txt")) :file/io-error)
+    (fn [reader] (fx/succeed> (line-seq reader)))
+    (fn [reader] (fx/try> (fn [] (.close reader))))))
+
+;; Evaluation at boundary
+(fx/run-sync! (fetch-user-profile 100) {:user-db {1 {:user-id 1 :name "Alice"}}})
+;; => {:user-id 100, :name "Guest", :role :anonymous}
+```
+
+---
+
+### Composable Lifecycle Layers (`fx.layer`)
+
+`fx.layer` manages dependency injection recipes and resource lifecycles with guaranteed reverse-order finalization, similar to Effect-ts Layer or ZIO Layer.
+
+| Function | Signature | Description |
+|---|---|---|
+| `from-value>` | `[key val]` | Creates an unmanaged layer providing a single `{key val}` entry. |
+| `from-values>` | `[context-map]` | Creates an unmanaged layer providing a static `context-map`. |
+| `from-effect>` | `[key effect]` | Creates an unmanaged layer providing `{key val}` by evaluating `effect`. |
+| `make>` | `[key acquire-eff release-fn]` | Creates a managed layer acquiring a resource and registering `(release-fn resource) -> Effect` for cleanup. |
+| `make-map>` | `[acquire-eff release-fn]` | Creates a managed layer acquiring a context map and registering `(release-fn ctx-map) -> Effect` for cleanup. |
+| `merge>` | `([] [layer] [l1 l2] [l1 l2 & more])` | Horizontally combines independent layers, evaluating them and merging context maps. |
+| `compose>` | `([] [layer] [l1 l2] [l1 l2 & more])` | Vertically chains layers, providing accumulated upstream context to downstream layer acquisition. |
+| `provide-layer>` | `([layer] [effect layer])` | Executes an effect pipeline within the context of `layer`, guaranteeing complete teardown of all acquired resources. |
+| `with-layer>` | `[layer use-eff-fn]` | Executes `(use-eff-fn context)` within the context of `layer`, guaranteeing teardown upon completion. |
+| `layer?` | `[x]` | Predicate returning true if `x` implements `ILayer`. |
+| `start-layer!` | `([layer] [layer initial-context])` | Synchronously starts a layer into an active `LayerSystem` record (`Closeable`, `ILookup`, `IDeref`). |
+| `stop-layer!` | `[system]` | Shuts down an active system, deterministically executing all layer finalizers in reverse acquisition order. |
+| `launch-sync!` | `([layer] [layer opts])` | Starts a layer, registers JVM shutdown hooks for graceful termination, and optionally blocks the calling thread (`{:join? true}`). |
+
+#### Usage Examples (`fx.layer`)
+
+```clojure
+(ns example.layer-demo
+  (:require [fx.core :as fx]
+            [fx.layer :as fx-layer]))
+
+;; 1. Define layers
+(def config-layer
+  (fx-layer/from-values> {:db-url "jdbc:sqlite::memory:" :http-port 8080}))
+
+(def db-pool-layer
+  (fx-layer/make> :db/pool
+    (-> (fx/service> :db-url)
+        (fx/mapcat> (fn [url] (fx/try> (fn [] (create-pool url)) :db/pool-init-failed))))
+    (fn [pool]
+      (fx/try> (fn [] (.close pool))))))
+
+(def http-server-layer
+  (fx-layer/make> :http/server
+    (-> (fx/context>)
+        (fx/mapcat> (fn [{:keys [db/pool http-port]}]
+                      (fx/try> (fn [] (start-server pool http-port)) :http/server-start-failed))))
+    (fn [server]
+      (fx/try> (fn [] (.stop server))))))
+
+;; 2. Compose vertically and horizontally
+(def app-layer
+  (fx-layer/compose>
+    config-layer
+    (fx-layer/merge> db-pool-layer)
+    http-server-layer))
+
+;; 3. Scoped execution with automatic teardown
+(fx/run-sync!
+  (-> (fx/service> :http/server)
+      (fx/map> (fn [srv] (str "Running server on " (:port srv))))
+      (fx-layer/provide-layer> app-layer)))
+```
+
+---
+
+### AST Metaprogramming & Pipeline Rewriting (`fx.utils`)
+
+Because `fx` pipelines are transparent data trees, `fx.utils` provides pure functions to inspect, query, transform, optimize, and rewrite pipelines without evaluating them.
+
+| Function | Signature | Description |
+|---|---|---|
+| `chain-length` | `[leaf-eff]` | Returns total number of effect stages in the linear pipeline. |
+| `effect-tags` | `[leaf-eff]` | Returns vector of tags in forward execution order `[:succeed :map ...]`. |
+| `effect-seq` | `[leaf-eff]` | Returns vector of effect nodes in forward execution order. |
+| `root-effect` | `[leaf-eff]` | Traverses upstream links to return the root effect. |
+| `find-first-by-tag` | `[leaf-eff tag]` | Finds first effect node matching `tag`. |
+| `find-all-by-tag` | `[leaf-eff tag]` | Returns all effect nodes matching `tag`. |
+| `map-effects` | `[leaf-eff f]` | Applies pure transform `(f eff)` to every node in the pipeline. |
+| `replace-by-tag` | `[leaf-eff tag replacement]` | Replaces first node matching `tag` with `replacement`. |
+| `remove-by-tag` | `[leaf-eff tag]` | Removes all nodes matching `tag` and reconnects surrounding nodes. |
+| `insert-after-tag` | `[leaf-eff tag new-eff]` | Slices `new-eff` immediately after the first node matching `tag`. |
+| `insert-before-tag` | `[leaf-eff tag new-eff]` | Slices `new-eff` immediately before the first node matching `tag`. |
+| `concat-chains` | `[chain-a chain-b]` | Concatenates two effect pipelines into a single continuous chain. |
+| `slice-effects` | `[leaf-eff start end]` | Extracts a sub-pipeline between stage indices `start` and `end`. |
+| `ast-seq` | `[root-eff]` | Traverses nested composite and branching AST nodes into a flat sequence. |
+| `pipe>` | `[& combinators]` | Composes pipeline combinators `(Effect -> Effect)` in forward execution order. |
+| `comp>` | `[& combinators]` | Composes pipeline combinators in standard mathematical right-to-left order. |
+| `pipe-fx-fn>` | `[& fx-fns]` | Composes effect-producing functions (Kleisli arrows: `a -> Effect[b]`). |
+| `around>` | `[before-fn after-fn]` | Wraps an effect stage with before/after actions while preserving its value. |
+| `with-scoped-service>` | `[key val combinator]` | Wraps a combinator to execute inside a scoped service binding. |
+| `compose-ast-passes` | `[& passes]` | Composes multiple AST rewrite passes into an optimizing compiler pipeline. |
+
+---
+
+## 3. Module Reference: `fx.async`
+
+`io.github.conjurernix/fx.async` provides first-class structured concurrency, lightweight fibers, parallel combinators, CSP channel bridging, and synchronization primitives.
+
+### Lightweight Fibers & Structured Lifecycles
+
+Fibers represent lightweight concurrent execution units with supervisor parent-child hierarchies, guaranteed finalization on interruption, and status tracking.
+
+| Function | Signature | Description |
+|---|---|---|
+| `fork>` | `([target-eff] [prev-eff target-eff])` | Forks an effect into a background fiber and yields an `IFiber` reference. |
+| `join>` | `([] [fiber-or-opts] [prev-eff fiber-or-opts])` | Awaits completion of a fiber and yields its outcome. Supports optional `:timeout-ms` and `:timeout-val`. |
+| `interrupt>` | `([] [fiber] [fiber reason] [prev-eff fiber reason])` | Interrupts a fiber and cascades cancellation to all its child fibers. |
+| `fiber-status>` | `([] [fiber] [prev-eff fiber])` | Queries the status (`:running`, `:succeeded`, `:failed`, `:interrupted`) of a fiber. |
+| `run-fiber!` | `[eff context]` | Evaluates an effect inside a newly spawned fiber. |
+| `join-fiber!` | `([fiber] [fiber timeout-ms timeout-val])` | Blocking join on fiber from JVM host thread. |
+| `interrupt-fiber!` | `([fiber] [fiber reason])` | Explicitly interrupts a running fiber. |
+
+---
+
+### Structured Parallel Combinators
+
+| Function | Signature | Description |
+|---|---|---|
+| `race>` | `([effects] [prev-eff effects])` | Races multiple effects concurrently; returns the first success and cancels all slower competitors. |
+| `all-par>` | `([effects] [effects opts] [prev-eff effects opts])` | Executes effects in parallel and returns a vector of results. Options: `{:concurrency n, :fail-fast? true}`. |
+| `map-par>` | `([f] [f coll] [f coll opts] [prev-eff f coll opts])` | Maps effect-producing function `f` concurrently across `coll`. Options: `{:concurrency n, :fail-fast? true}`. |
+
+---
+
+### Execution Engines & Scopes
+
+| Function | Signature | Description |
+|---|---|---|
+| `with-virtual-threads>` | `([eff] [prev-eff eff])` | Scopes execution of `eff` to Java Virtual Threads. |
+| `with-thread-pool>` | `([executor-or-eff] [prev-eff executor-or-eff])` | Scopes execution of `eff` to a custom Java `ExecutorService` thread pool. |
+| `with-go>` | `([eff] [prev-eff eff])` | Scopes execution of `eff` to `core.async` go-routines. |
+
+---
+
+### CSP Channel Bridging (`core.async`)
+
+| Function | Signature | Description |
+|---|---|---|
+| `chan>` | `([] [buf-or-n] [buf-or-n xform] [buf-or-n xform exh])` | Creates a `core.async` channel effect. |
+| `chan-put>` | `([ch val] [val] [prev-eff ch val])` | Puts `val` onto channel `ch`. |
+| `chan-take>` | `([ch] [prev-eff ch])` | Takes a value from channel `ch`. |
+| `chan-close>` | `([ch] [prev-eff ch])` | Closes channel `ch`. |
+| `chan-alts>` | `([ports] [ports opts] [prev-eff ports opts])` | Structured select/alt across multiple channel ports. |
+| `chan-pipe>` | `([from-ch to-ch] [from-ch to-ch close?])` | Pipes all values from `from-ch` into `to-ch`. |
+| `chan-drain>` | `([ch] [prev-eff ch])` | Reads all values from channel until closed, returning vector. |
+| `chan-pub>` | `([ch topic-fn] [ch topic-fn buf-fn])` | Creates a publication hub from a channel. |
+| `chan-sub>` | `([pub topic ch] [pub topic ch close?])` | Subscribes a channel to a publication topic. |
+| `chan-unsub>` | `([pub topic ch])` | Unsubscribes a channel from a publication topic. |
+
+---
+
+### Coordination & Synchronization Primitives
+
+| Category | Primitives | Description |
+|---|---|---|
+| **Queues** | `queue-bounded>`, `queue-unbounded>`, `queue-sliding>`, `queue-dropping>`, `queue-offer>`, `queue-take>`, `queue-poll>`, `queue-size>`, `queue-shutdown>` | Pure in-memory queues with backpressure and sliding/dropping buffer policies. |
+| **Hubs** | `hub-bounded>`, `hub-publish>`, `hub-subscribe>`, `hub-unsubscribe>`, `hub-subscriber-count>`, `hub-shutdown>` | 1-to-many broadcast channels distributing messages to multiple subscribers. |
+| **Deferreds** | `deferred>`, `deferred-succeed>`, `deferred-fail>`, `deferred-await>` | Single-assignment async value cell. |
+| **Semaphores** | `semaphore>`, `semaphore-acquire>`, `semaphore-release>`, `semaphore-available-permits>`, `with-permit>` | Counting semaphores for bounding concurrent resource utilization. |
+| **Latches** | `countdown-latch>`, `latch-count-down>`, `latch-await>`, `latch-get-count>` | Async countdown synchronization barriers. |
+| **Refs** | `ref>`, `ref-get>`, `ref-set>`, `ref-update>` | Pure atomic state cells within effect pipelines. |
+
+#### Usage Examples (`fx.async`)
+
+```clojure
+(ns example.async-demo
+  (:require [fx.core :as fx]
+            [fx.async :as fxa]))
+
+;; Bounded parallel processing
+(defn fetch-all-items [item-ids]
+  (-> item-ids
+      (fxa/map-par>
+        (fn [id] (fetch-remote-item> id))
+        {:concurrency 8 :fail-fast? true})))
+
+;; Speculative racing
+(defn fetch-with-fallback []
+  (fxa/race>
+    [(fetch-from-fast-primary-cache>)
+     (fetch-from-resilient-backend>)]))
+
+;; Fiber Fork & Join with Semaphore Throttling
+(defn throttled-fiber-execution [items]
+  (-> (fxa/semaphore> 3)
+      (fx/mapcat> (fn [sem]
+                    (fxa/map-par>
+                      (fn [item]
+                        (fxa/with-permit> sem (process-item> item)))
+                      items
+                      {:concurrency 10})))))
+```
+
+---
+
+## 4. Module Reference: `fx.schedule`
+
+`io.github.conjurernix/fx.schedule` provides a pure schedule and resilience algebra for retry strategies, recurring tasks, circuit breakers, and rate limiters.
+
+### Schedule Mental Model & `ISchedule` Protocol
+
+A schedule is a pure immutable state machine implementing `ISchedule`:
+- `(-initial-state schedule)`: Returns initial state.
+- `(-step schedule state now input)`: Pure transition returning:
+  ```clojure
+  {:decision :recur | :halt
+   :delay-ms <long>
+   :state    <any>
+   :out      <any>}
+  ```
+
+---
+
+### Schedule Constructors & Backoff Policies
+
+| Constructor | Signature | Description | Default Output |
+|---|---|---|---|
+| `forever>` | `([])` | Recurs indefinitely with 0ms delay. | Recurrence count |
+| `once>` | `([])` | Recurs exactly once with 0ms delay. | Recurrence count |
+| `recur-n>` | `([n])` | Recurs at most `n` times with 0ms delay. | Recurrence count |
+| `fixed>` | `([delay-ms])` | Recurs indefinitely with fixed `delay-ms` interval. | Recurrence count |
+| `linear-backoff>` | `([opts])` | Linear backoff: `(* initial-ms attempt)` up to `:max-ms`. | Computed `delay-ms` |
+| `exponential-backoff>` | `([opts])` | Exponential backoff: `(* initial-ms (pow factor attempt))` up to `:max-ms`. | Computed `delay-ms` |
+| `fibonacci-backoff>` | `([opts])` | Fibonacci sequence delay backoff up to `:max-ms`. | Computed `delay-ms` |
+| `elapsed>` | `([max-duration-ms])` | Recurs while total elapsed time is under `max-duration-ms`. | Elapsed ms |
+
+---
+
+### Schedule Combinators
+
+- **Composition:**
+  - `intersect>`: `(sched/intersect> s1 s2)` - Runs both schedules in lockstep; recurs while **both** continue; uses `(max delay1 delay2)`.
+  - `union>`: `(sched/union> s1 s2)` - Runs both schedules in lockstep; recurs while **either** continues; uses `(min delay1 delay2)`.
+  - `and-then>`: `(sched/and-then> s1 s2)` - Evaluates `s1` to exhaustion, then continues with `s2`.
+- **Timing Modifiers:**
+  - `jitter>`: `(sched/jitter> schedule factor)` - Applies randomized jitter `[(- 1.0 factor), (+ 1.0 factor)]` to delay.
+  - `modify-delay>`: `(sched/modify-delay> schedule f)` - Transforms delay using `(f delay-ms state)`.
+- **Filtering & Predicates:**
+  - `while-input>` / `until-input>`: Predicates tested against incoming value or `IFailure`.
+  - `while-output>` / `until-output>`: Predicates tested against schedule's computed output.
+  - `while-tag>`: `(sched/while-tag> schedule tag-key-or-set)` - Retries only when failure `:tag` matches.
+  - `until-tag>`: `(sched/until-tag> schedule tag-key-or-set)` - Halts retries when failure `:tag` matches.
+- **Output Transformation:**
+  - `map-output>`: `(sched/map-output> schedule f)` - Transforms schedule output value.
+  - `tap-step>`: `(sched/tap-step> schedule tap-fn)` - Observes step transition events.
+
+---
+
+### Effect Integrations: Retries & Recurrence
+
+| Function | Signature | Description |
+|---|---|---|
+| `retry-schedule>` | `([schedule] [eff schedule])` | Retries a failed effect according to `schedule` until it succeeds or the schedule halts. |
+| `repeat-schedule>` | `([schedule] [eff schedule])` | Repeats a successful effect according to `schedule` until it fails or the schedule halts. |
+
+---
+
+### Resilience Primitives: Circuit Breakers & Rate Limiters
+
+#### Circuit Breaker (`circuit-breaker>`)
+Protects external dependencies by fast-failing when consecutive error thresholds are exceeded.
+- States: `:closed` (normal), `:open` (fast-fail with `:circuit-breaker/open`), `:half-open` (canary probe).
+- Constructor: `(sched/make-circuit-breaker {:failure-threshold 3 :reset-timeout-ms 5000 :trip-on? (fn [fail] true)})`.
+- Combinator: `(sched/circuit-breaker> eff breaker)`.
+
+#### Rate Limiter (`rate-limiter>`)
+In-memory token-bucket rate limiter.
+- Fast-fails with `:rate-limiter/exceeded` when burst budget is exhausted.
+- Constructor: `(sched/make-rate-limiter {:limit 50 :interval-ms 1000})`.
+- Combinator: `(sched/rate-limiter> eff limiter)`.
+
+---
+
+## 5. Module Reference: `fx.http-client`
+
+`io.github.conjurernix/fx.http-client` provides declarative HTTP client effects built on Hato and Java 11's `java.net.http.HttpClient`.
+
+### Client Lifecycle & Context Injection
+
+| Function | Signature | Description |
+|---|---|---|
+| `build-client>` | `[opts]` | Creates an effect yielding a configured `java.net.http.HttpClient`. |
+| `with-client>` | `[eff client]` | Injects `client` into `:fx.http-client/client` in the execution context for `eff`. |
+| `client?` | `[x]` | Predicate testing if `x` is a `java.net.http.HttpClient`. |
+
+---
+
+### HTTP Request Combinators
+
+All request combinators resolve ambient client bindings from `:fx.http-client/client` in context, or fall back to an internal default client.
+
+| Function | Signature | Description |
+|---|---|---|
+| `request>` | `([req-map] [client req-map])` | Constructs an HTTP request effect from a request specification map. |
+| `get>` | `([url] [url opts] [client url opts])` | HTTP GET request effect. |
+| `post>` | `([url opts] [client url opts])` | HTTP POST request effect. |
+| `put>` | `([url opts] [client url opts])` | HTTP PUT request effect. |
+| `delete>` | `([url] [url opts] [client url opts])` | HTTP DELETE request effect. |
+| `patch>` | `([url opts] [client url opts])` | HTTP PATCH request effect. |
+| `head>` | `([url] [url opts] [client url opts])` | HTTP HEAD request effect. |
+| `options>` | `([url] [url opts] [client url opts])` | HTTP OPTIONS request effect. |
+
+---
+
+### Response Combinators & Error Predicates
+
+| Combinator / Predicate | Signature | Description |
+|---|---|---|
+| `body>` | `[eff]` | Extracts `:body` from upstream HTTP response. |
+| `status>` | `[eff]` | Extracts `:status` integer from upstream HTTP response. |
+| `headers>` | `[eff]` | Extracts `:headers` map from upstream HTTP response. |
+| `response?` | `[x]` | True if `x` is a valid HTTP response map. |
+| `ok?` | `[x]` | True if response status is 200. |
+| `success?` | `[x]` | True if response status is 2xx (200-299). |
+| `redirect?` | `[x]` | True if response status is 3xx (300-399). |
+| `client-error?` | `[x]` | True if failure is a 4xx client error (`:http/client-error`). |
+| `server-error?` | `[x]` | True if failure is a 5xx server error (`:http/server-error`). |
+| `timeout-error?` | `[x]` | True if failure is a timeout (`:http/timeout`). |
+| `connection-error?` | `[x]` | True if failure is a connection failure (`:http/connection-error`). |
+| `http-error?` | `[x]` | True if failure is any categorized HTTP error. |
+
+#### Usage Example (`fx.http-client`)
+
+```clojure
+(ns example.http-demo
+  (:require [fx.core :as fx]
+            [fx.http-client :as http]
+            [fx.schedule :as sched]))
+
+(def get-user-data
+  (-> (http/get> "https://api.example.com/users/42" {:as :json :timeout 3000})
+      (sched/retry-schedule>
+        (-> (sched/exponential-backoff> {:initial-ms 100 :factor 2.0})
+            (sched/intersect> (sched/recur-n> 3))
+            (sched/while-tag> #{:http/server-error :http/timeout})))
+      (http/body>)))
+```
+
+---
+
+## 6. Module Reference: `fx.jdbc`
+
+`io.github.conjurernix/fx.jdbc` provides purely functional JDBC database access built on `next.jdbc`.
+
+### Connection & Datasource Management
+
+| Function | Signature | Description |
+|---|---|---|
+| `get-datasource>` | `[db-spec]` | Creates an effect yielding a `javax.sql.DataSource` from a db-spec map or JDBC URL. |
+| `get-connection>` | `([] [connectable] [connectable opts])` | Creates an effect acquiring a `java.sql.Connection` from explicit connectable or context. |
+| `close-connection>` | `[conn]` | Creates an effect safely closing an `AutoCloseable` connection or statement. |
+| `with-connection>` | `([eff] [connectable eff] [connectable opts eff])` | Scopes connection acquisition, binds `:fx.jdbc/connection` and `:fx.jdbc/datasource` into context, executes `eff`, and guarantees close. |
+| `provide-datasource>` | `([ds] [ds eff])` | Injects `:fx.jdbc/datasource` into execution context. |
+| `provide-connection>` | `([conn] [conn eff])` | Injects `:fx.jdbc/connection` into execution context. |
+| `provide-transaction>` | `([tx] [tx eff])` | Injects active `:fx.jdbc/transaction` into execution context. |
+
+---
+
+### Transactions & Dual-Failure Rollback Semantics
+
+`with-transaction>` executes an effect pipeline within an atomic transaction.
+
+**Dual-Failure Rollback:** Transactions automatically roll back if:
+1. A Java host exception (`Throwable`) is thrown.
+2. Any step in the effect pipeline returns an `IFailure` record on the failure channel.
+
+Nested transactions automatically create JDBC savepoints.
+
+| Option | Description |
+|---|---|
+| `:isolation` | Isolation level: `:none`, `:read-uncommitted`, `:read-committed`, `:repeatable-read`, `:serializable`. |
+| `:read-only` | Boolean setting connection read-only mode. |
+| `:rollback-only` | Boolean forcing rollback even if the effect succeeded. |
+
+---
+
+### Statement Execution & Streaming Reductions (`plan!>`)
+
+| Function | Signature | Description |
+|---|---|---|
+| `execute!>` | `([sql-params] [conn sql-params] [sql-params opts] [conn sql-params opts])` | Executes SQL statement, returning a vector of row maps or update count. |
+| `execute-one!>` | `([sql-params] [conn sql-params] [sql-params opts] [conn sql-params opts])` | Executes SQL statement, returning the first row map or `nil`. |
+| `plan!>` | `([sql-params reduce-fn init] [conn sql-params reduce-fn init] [sql-params opts reduce-fn init] [conn sql-params opts reduce-fn init])` | Streams query results lazily through `(reduce reduce-fn init plan)` in constant memory. |
+| `with-prepared-statement>` | `([sql-params use-eff-fn] [conn sql-params use-eff-fn] [sql-params opts use-eff-fn] [conn sql-params opts use-eff-fn])` | Prepares a statement, passes it to `use-eff-fn`, and guarantees statement closure. |
+
+---
+
+### High-Level SQL CRUD Combinators (`fx.jdbc.sql`)
+
+| Function | Signature | Description |
+|---|---|---|
+| `insert!>` | `([table row] [conn table row] [table row opts] [conn table row opts])` | Inserts a map into `table`. |
+| `insert-multi!>` | `([table rows] [conn table rows] [table cols rows] [table rows opts] ...)` | Batch inserts multiple rows into `table`. |
+| `query!>` | `([sql-params] [conn sql-params] [sql-params opts] [conn sql-params opts])` | Queries rows using SQL vector. |
+| `find-by-keys!>` | `([table col-map] [conn table col-map] [table col-map opts] [conn table col-map opts])` | Queries rows matching column equality map `{column value}`. |
+| `get-by-id!>` | `([table id] [conn table id] [table id opts] [conn table id opts])` | Retrieves single row by primary key (default `:id`). |
+| `update!>` | `([table col-map where-params] [conn table col-map where-params] ...)` | Updates rows matching `where-params` with values from `col-map`. |
+| `delete!>` | `([table where-params] [conn table where-params] ...)` | Deletes rows matching `where-params`. |
+
+---
+
+## 7. Module Reference: `fx.ring`
+
+`io.github.conjurernix/fx.ring` integrates pure effect pipelines into Ring HTTP servers.
+
+### Ring Middleware Adapters
+
+| Function | Signature | Description |
+|---|---|---|
+| `wrap-fx` | `([handler] [handler opts])` | Adapts an effect handler `(fn [req] -> effect)` into a 1-arity synchronous or 3-arity asynchronous Ring handler with failure translation and ambient context injection. |
+| `wrap-fx-runner` | `([handler] [handler opts])` | Granular middleware evaluating effect handlers into response/failure values without failure translation. |
+| `wrap-fx-failures` | `([handler] [handler opts])` | Catches returned `IFailure` records and converts them to Ring response maps. |
+| `wrap-fx-context` | `[handler context-or-provider]` | Injects ambient context map or provider function into request under `:fx/context`. |
+| `wrap-fx-all` | `([handler] [handler opts] [handler context opts])` | Composite middleware layering context injection, failure translation, and execution runner. |
+
+---
+
+### 3-Tier Hybrid Failure Translation
+
+When an effect pipeline yields an `IFailure`, `wrap-fx` converts it into an HTTP response using a 3-tier resolution strategy:
+1. **Tier 1 — Explicit `:failure-map`:** Looks up failure tag in `:failure-map`.
+2. **Tier 2 — Status Reflection:** If `error-data` contains an integer `:status`, uses it directly with headers and body.
+3. **Tier 3 — Fallback Handler:** Invokes `:default-handler` or emits a standard `500 Internal Server Error`.
+
+---
+
+### Response Constructors & Combinators (`fx.ring.response`)
+
+| Function | Signature | Description |
+|---|---|---|
+| `request>` | `([] [key] [key default-val])` | Reads the active Ring request map or a specific key from context key `:fx.ring/request`. |
+| `ok>` | `([] [eff-or-body] [eff body])` | Constructs or transforms into a `200 OK` response. |
+| `created>` | `([] [eff-or-url] [eff-or-url url-or-body] [eff url body])` | Constructs or transforms into a `201 Created` response. |
+| `bad-request>` | `([] [eff-or-body] [eff body])` | Constructs or transforms into a `400 Bad Request` response. |
+| `not-found>` | `([] [eff-or-body] [eff body])` | Constructs or transforms into a `404 Not Found` response. |
+| `internal-server-error>` | `([] [eff-or-body] [eff body])` | Constructs or transforms into a `500 Internal Server Error` response. |
+| `redirect>` | `([url] [eff-or-url url-or-status] [eff url status])` | Constructs a redirect response (default 302). |
+| `status>` | `([status-code] [eff status-code])` | Sets the HTTP status code on a response map. |
+| `header>` | `([header-name header-val] [eff header-name header-val])` | Sets an HTTP header on a response map. |
+| `content-type>` | `([content-type-str] [eff content-type-str])` | Sets the `Content-Type` header on a response map. |
+
+---
+
+## 8. Module Reference: `fx.observability`
+
+`io.github.conjurernix/fx.observability` provides zero-dependency contextual logging, distributed tracing, in-memory metrics, Cause diagnostics, and telemetry taps.
+
+### Structured & Contextual Logging (`fx.observability.log`)
+
+- `(annotate-logs> annotations-map)`: Merges structured key-value pairs into `:fx.observability/log-annotations` in context.
+- `(log-info> message data)` / `(log-error> message data)`: Emits structured log records inheriting active context annotations, span IDs, and trace IDs.
+- `(with-logger> custom-sink-fn eff)`: Scopes a custom log sink function.
+
+---
+
+### Distributed Tracing & W3C Spans (`fx.observability.trace`)
+
+- `(with-span> span-name body-eff)` / `(with-span> span-name attrs body-eff)`: Pushes a tracing span frame onto `:fx.observability/trace-spans` recording start/end timestamps and elapsed nanoseconds.
+- `(extract-trace-context carrier-map)`: Parses inbound W3C `traceparent` headers into a trace context map.
+- `(inject-trace-context carrier-map trace-ctx)`: Injects active `traceparent` into outbound header maps.
+
+---
+
+### In-Memory Lock-Free Metrics (`fx.observability.metrics`)
+
+- `(make-metrics-registry)`: Constructs a thread-safe in-memory metric registry using JVM atomics (`LongAdder`, `DoubleAdder`).
+- `(metric-counter name tags)`: Creates an atomic counter.
+- `(metric-timer name tags)`: Creates a latency timer tracking count, min, max, avg, and sum.
+- `(metric-gauge name tags)`: Creates a value gauge.
+- `(track-duration> timer eff)`: Records execution duration of `eff` in `timer`.
+- `(track-success-count> counter eff)`: Increments `counter` on successful completion of `eff`.
+- `(metrics-snapshot! registry)`: Returns a pure data snapshot map of all registered metrics.
+
+---
+
+### Diagnostics & Cause Algebra (`fx.observability.diagnostics`)
+
+- `(sandbox> eff)`: Catches both domain failures (`Fail`) and JVM exceptions (`Die`) and wraps them into a typed `Cause` tree on the success channel.
+- `(render-cause cause)`: Formats a `Cause` tree into a readable ASCII error diagram.
+- `(render-execution-trace eff)`: Renders the linear AST steps leading to a failure.
+
+---
+
+### Telemetry Event Taps (`fx.observability.telemetry`)
+
+- `(tap-telemetry> event-name data eff)`: Intercepts pipeline execution and dispatches event records to the ambient telemetry sink without altering pipeline results.
+- `(with-telemetry-sink> sink-fn eff)`: Scopes a telemetry sink function `(fn [event])`.
+
+---
+
+## 9. Module Reference: `fx.typed`
+
+`io.github.conjurernix/fx.typed` provides Typed Clojure static type contracts.
+
+### Type Constructor & Variance Rules
+
+An effect is represented as a 4-parameter type constructor:
+```clojure
+(fx/IEffect In Out Failure Context)
+```
+
+1. **`In` (Contravariant):** Expected input type when evaluating upstream pipeline values.
+2. **`Out` (Covariant):** Result type yielded on the success channel.
+3. **`Failure` (Covariant):** Error type yielded on the failure channel `(t/Option (fx/IFailure Tag Error))`.
+4. **`Context` (Covariant):** Required environmental context map structure.
+
+---
+
+## 10. End-to-End Production Application Architecture
+
+Here is a full, real-world example illustrating how all 8 modules integrate into a production web service:
+
+```clojure
+(ns example.production-service
+  (:require [fx.core :as fx]
+            [fx.async :as fxa]
+            [fx.http-client :as http]
+            [fx.jdbc :as fx-jdbc]
+            [fx.jdbc.sql :as sql]
+            [fx.layer :as fx-layer]
+            [fx.observability.log :as log]
+            [fx.observability.metrics :as metrics]
+            [fx.observability.trace :as trace]
+            [fx.ring :as fx-ring]
+            [fx.ring.response :as fx-resp]
+            [fx.schedule :as sched]))
+
+;; ---------------------------------------------------------------------------
+;; 1. Resilience Policies
+;; ---------------------------------------------------------------------------
+
+(def http-retry-policy
+  (-> (sched/exponential-backoff> {:initial-ms 100 :factor 2.0 :max-ms 2000})
+      (sched/jitter> 0.1)
+      (sched/intersect> (sched/recur-n> 3))
+      (sched/while-tag> #{:http/server-error :http/timeout :http/connection-error})))
+
+(def db-retry-policy
+  (-> (sched/linear-backoff> {:initial-ms 50 :factor 2 :max-ms 500})
+      (sched/intersect> (sched/recur-n> 3))
+      (sched/while-tag> :jdbc/error)))
+
+;; ---------------------------------------------------------------------------
+;; 2. Domain Logic & Effect Pipelines
+;; ---------------------------------------------------------------------------
+
+(defn sync-external-users> [source-url]
+  (-> (log/annotate-logs> {:action "sync-users" :source source-url})
+      (trace/with-span> "users.sync"
+        (-> (http/get> source-url {:as :json :timeout 5000})
+            (sched/retry-schedule> http-retry-policy)
+            (http/body>)
+            (fxa/map-par>
+              (fn [user-record]
+                (trace/with-span> "users.persist-user"
+                  (fx-jdbc/with-transaction>
+                    (-> (sql/insert!> :users user-record)
+                        (sched/retry-schedule> db-retry-policy)))))
+              {:concurrency 4 :fail-fast? true})
+            (fx/map> (fn [persisted] {:status :synced :count (count persisted)}))))))
+
+;; ---------------------------------------------------------------------------
+;; 3. Ring HTTP Handler & Failure Mapping
+;; ---------------------------------------------------------------------------
+
+(defn sync-endpoint-handler [req]
+  (if-let [url (get-in req [:params :url])]
+    (-> (sync-external-users> url)
+        (fx/map> (fn [res] (fx-resp/ok> res))))
+    (fx/fail> :validation/missing-param {:field "url" :message "Query parameter 'url' is required"})))
+
+(def app-handler
+  (fx-ring/wrap-fx sync-endpoint-handler
+    {:failure-map
+     {:validation/missing-param
+      (fn [data _req]
+        {:status 400 :headers {"Content-Type" "application/json"} :body {:error (:message data)}})
+
+      :http/server-error
+      (fn [err _req]
+        {:status 502 :headers {"Content-Type" "application/json"} :body {:error "External service unavailable" :details err}})}}))
+
+;; ---------------------------------------------------------------------------
+;; 4. Declarative Application Lifecycle (`fx.layer`)
+;; ---------------------------------------------------------------------------
+
+(def config-layer
+  (fx-layer/from-values> {:db-spec {:dbtype "sqlite" :dbname "prod.db"} :port 3000}))
+
+(def metrics-layer
+  (fx-layer/from-value> :fx.observability/metrics-registry (metrics/make-metrics-registry)))
+
+(def db-layer
+  (fx-layer/make> :fx.jdbc/datasource
+    (-> (fx/service> :db-spec)
+        (fx/mapcat> fx-jdbc/get-datasource>))
+    (fn [_ds] (fx/succeed> nil))))
+
+(def app-system-layer
+  (fx-layer/compose>
+    (fx-layer/merge> config-layer metrics-layer)
+    db-layer))
+
+(defn -main [& _args]
+  (fx-layer/launch-sync! app-system-layer {:join? true}))
+```
