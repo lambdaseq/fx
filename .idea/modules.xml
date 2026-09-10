@@ -4,13 +4,9 @@
     <modules>
       <module fileurl="file://$PROJECT_DIR$/example/example.iml" filepath="$PROJECT_DIR$/example/example.iml" />
       <module fileurl="file://$PROJECT_DIR$/fx.iml" filepath="$PROJECT_DIR$/fx.iml" />
-      <module fileurl="file://$PROJECT_DIR$/modules/fx-async/fx-async.iml" filepath="$PROJECT_DIR$/modules/fx-async/fx-async.iml" />
       <module fileurl="file://$PROJECT_DIR$/modules/fx-core/fx-core.iml" filepath="$PROJECT_DIR$/modules/fx-core/fx-core.iml" />
-      <module fileurl="file://$PROJECT_DIR$/modules/fx-http-client/fx-http-client.iml" filepath="$PROJECT_DIR$/modules/fx-http-client/fx-http-client.iml" />
       <module fileurl="file://$PROJECT_DIR$/modules/fx-jdbc/fx-jdbc.iml" filepath="$PROJECT_DIR$/modules/fx-jdbc/fx-jdbc.iml" />
-      <module fileurl="file://$PROJECT_DIR$/modules/fx-observability/fx-observability.iml" filepath="$PROJECT_DIR$/modules/fx-observability/fx-observability.iml" />
       <module fileurl="file://$PROJECT_DIR$/modules/fx-ring/fx-ring.iml" filepath="$PROJECT_DIR$/modules/fx-ring/fx-ring.iml" />
-      <module fileurl="file://$PROJECT_DIR$/modules/fx-schedule/fx-schedule.iml" filepath="$PROJECT_DIR$/modules/fx-schedule/fx-schedule.iml" />
       <module fileurl="file://$PROJECT_DIR$/modules/fx-typed/fx-typed.iml" filepath="$PROJECT_DIR$/modules/fx-typed/fx-typed.iml" />
     </modules>
   </component>
