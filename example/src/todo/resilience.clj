@@ -15,6 +15,15 @@
       (sched/intersect> (sched/recur-n> 3))
       (sched/while-tag> #{:fx.jdbc/error :jdbc/error :db/busy :sqlite/busy})))
 
+(def webhook-retry-policy
+  "Retry policy for outbound webhook dispatching.
+   Uses exponential backoff (50ms base, factor 2.0, 1000ms max) with 10% jitter,
+   retries at most 3 times, filtering on transient HTTP error tags."
+  (-> (sched/exponential-backoff> {:initial-ms 50 :factor 2.0 :max-ms 1000})
+      (sched/jitter> 0.1)
+      (sched/intersect> (sched/recur-n> 3))
+      (sched/while-tag> #{:http/server-error :http/timeout :http/connection-error})))
+
 ;; ---------------------------------------------------------------------------
 ;; Rate Limiter Constructors
 ;; ---------------------------------------------------------------------------

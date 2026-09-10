@@ -1,9 +1,15 @@
 (ns todo.domain
-  (:require [fx.core :as fx]
+  (:require [cheshire.core :as json]
+            [clojure.string :as str]
+            [fx.core :as fx]
+            [fx.http-client :as http]
+            [fx.jdbc :as fx-jdbc]
             [fx.observability.log :as log]
             [fx.observability.metrics :as metrics]
             [fx.observability.trace :as trace]
+            [fx.schedule :as sched]
             [todo.db :as db]
+            [todo.resilience :as resilience]
             [todo.schema :as schema])
   (:import (java.time Instant)))
 
@@ -110,3 +116,73 @@
                                            :id      id}))
                                (log/log-info> "Todo deleted" {:id id})))))
          (metrics/track-success-count> (metrics/metric-counter "todo.deleted.total")))))
+
+(defn import-remote-todos>
+  "Fetches remote todos from an external JSON endpoint and persists them into SQLite.
+   Accepts `payload` map `{:keys [url limit]}`.
+   Validates input payload, performs GET request with timeout, extracts todo items,
+   normalizes attributes, and batch inserts records inside a transaction."
+  [payload]
+  (trace/with-span> "todo.import-remote" {:payload payload}
+    (->> (-> (schema/validate-import-payload> payload)
+             (fx/mapcat> (fn [{:keys [url limit]}]
+                           (-> (http/get> url {:as :json :timeout 5000})
+                               (fx/mapcat> (fn [resp]
+                                             (let [raw-body (:body resp)
+                                                   items (cond
+                                                           (sequential? raw-body) raw-body
+                                                           (and (map? raw-body) (sequential? (:todos raw-body))) (:todos raw-body)
+                                                           (and (map? raw-body) (sequential? (:items raw-body))) (:items raw-body)
+                                                           (map? raw-body) [raw-body]
+                                                           :else [])
+                                                   limited-items (if (and limit (pos? limit))
+                                                                   (take limit items)
+                                                                   items)
+                                                   now (str (Instant/now))
+                                                   records (keep (fn [item]
+                                                                   (let [title (or (:title item) (:name item))]
+                                                                     (when (and (string? title) (not (str/blank? title)))
+                                                                       {:title       (str/trim title)
+                                                                        :description (some-> (or (:description item) (:body item)) str/trim)
+                                                                        :completed   (boolean (or (:completed item) false))
+                                                                        :created-at  now
+                                                                        :updated-at  now})))
+                                                                 limited-items)]
+                                               (if (empty? records)
+                                                 (fx/succeed> {:imported-count 0 :todos []})
+                                                 (fx-jdbc/with-transaction>
+                                                   (-> (reduce (fn [acc-eff record]
+                                                                 (-> acc-eff
+                                                                     (fx/mapcat> (fn [acc]
+                                                                                   (-> (db/insert-todo!> record)
+                                                                                       (fx/map> (fn [inserted]
+                                                                                                  (conj acc inserted))))))))
+                                                               (fx/succeed> [])
+                                                               records)
+                                                       (fx/map> (fn [inserted-todos]
+                                                                  {:imported-count (count inserted-todos)
+                                                                   :todos          inserted-todos}))))))))
+                               (log/log-info> "Remote todos imported" {:url url})))))
+         (metrics/track-success-count> (metrics/metric-counter "todo.imported.total")))))
+
+(defn notify-webhook>
+  "Fetches a todo by `id` and dispatches a JSON notification payload to `webhook-url`.
+   Applies exponential backoff retries on transient network/server failures."
+  [todo-id payload]
+  (trace/with-span> "todo.notify-webhook" {:todo-id todo-id :payload payload}
+    (->> (-> (schema/validate-webhook-payload> payload)
+             (fx/mapcat> (fn [{:keys [webhook-url]}]
+                           (-> (get-todo-by-id> todo-id)
+                               (fx/mapcat> (fn [todo]
+                                             (-> (http/post> webhook-url {:body    (json/generate-string todo)
+                                                                          :headers {"content-type" "application/json"}
+                                                                          :as      :json
+                                                                          :timeout 5000})
+                                                 (sched/retry-schedule> resilience/webhook-retry-policy)
+                                                 (fx/map> (fn [resp]
+                                                            {:notified      true
+                                                             :todo-id       todo-id
+                                                             :webhook-url   webhook-url
+                                                             :remote-status (:status resp)}))
+                                                 (log/log-info> "Webhook notification dispatched" {:todo-id todo-id :webhook-url webhook-url}))))))))
+         (metrics/track-success-count> (metrics/metric-counter "todo.webhook.notified.total")))))

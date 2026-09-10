@@ -49,6 +49,15 @@
 (def IdSchema
   [:int {:min 1}])
 
+(def ImportRemotePayload
+  [:map {:closed false}
+   [:url NonBlankString]
+   [:limit {:optional true} [:int {:min 1}]]])
+
+(def NotifyWebhookPayload
+  [:map {:closed false}
+   [:webhook-url NonBlankString]])
+
 ;; ---------------------------------------------------------------------------
 ;; Validation & Coercion Helpers
 ;; ---------------------------------------------------------------------------
@@ -125,3 +134,40 @@
       (fx/succeed> coerced)
       (fx/fail> :todo/invalid-input {:message "Todo ID must be a valid positive integer"
                                      :field   :id}))))
+
+(defn validate-import-payload>
+  "Validates and coerces payload for importing remote todos.
+   Yields an effect with coerced map on success, or fails with `:todo/invalid-input`."
+  [payload]
+  (cond
+    (not (map? payload))
+    (fx/fail> :todo/invalid-input {:message "Request body must be a JSON object"})
+
+    :else
+    (let [coerced (coerce ImportRemotePayload payload)
+          errors  (explain-errors ImportRemotePayload coerced)]
+      (if (nil? errors)
+        (fx/succeed> (cond-> (assoc coerced :url (str/trim (:url coerced)))
+                       (:limit coerced) (assoc :limit (:limit coerced))))
+        (let [first-field (first (keys errors))]
+          (fx/fail> :todo/invalid-input {:message (str "Field '" (name first-field) "' validation failed: " (get errors first-field))
+                                         :field   first-field
+                                         :errors  errors}))))))
+
+(defn validate-webhook-payload>
+  "Validates and coerces payload for notifying a webhook.
+   Yields an effect with coerced map on success, or fails with `:todo/invalid-input`."
+  [payload]
+  (cond
+    (not (map? payload))
+    (fx/fail> :todo/invalid-input {:message "Request body must be a JSON object"})
+
+    :else
+    (let [coerced (coerce NotifyWebhookPayload payload)
+          errors  (explain-errors NotifyWebhookPayload coerced)]
+      (if (nil? errors)
+        (fx/succeed> (assoc coerced :webhook-url (str/trim (:webhook-url coerced))))
+        (let [first-field (first (keys errors))]
+          (fx/fail> :todo/invalid-input {:message (str "Field '" (name first-field) "' validation failed: " (get errors first-field))
+                                         :field   first-field
+                                         :errors  errors}))))))

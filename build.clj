@@ -11,10 +11,11 @@
    :jdbc          {:lib 'io.github.conjurernix/fx.jdbc          :dir "modules/fx-jdbc"          :description "Effectful, purely functional JDBC database access for fx"}
    :ring          {:lib 'io.github.conjurernix/fx.ring          :dir "modules/fx-ring"          :description "Ring HTTP middleware and response combinators for fx"}
    :observability {:lib 'io.github.conjurernix/fx.observability :dir "modules/fx-observability" :description "Structured logging, distributed tracing, in-memory metrics, and diagnostics for fx"}
-   :schedule      {:lib 'io.github.conjurernix/fx.schedule      :dir "modules/fx-schedule"      :description "Composable schedules, recurrence policies, retries, and resilience primitives for fx"}})
+   :schedule      {:lib 'io.github.conjurernix/fx.schedule      :dir "modules/fx-schedule"      :description "Composable schedules, recurrence policies, retries, and resilience primitives for fx"}
+   :http-client   {:lib 'io.github.conjurernix/fx.http-client   :dir "modules/fx-http-client"   :description "Declarative, purely functional HTTP client effects for fx built on Hato"}})
 
 (def default-all-modules
-  ["modules/fx-core" "modules/fx-typed" "modules/fx-jdbc" "modules/fx-ring" "modules/fx-observability" "modules/fx-schedule"])
+  ["modules/fx-core" "modules/fx-typed" "modules/fx-jdbc" "modules/fx-ring" "modules/fx-observability" "modules/fx-schedule" "modules/fx-http-client"])
 
 (def internal-libs
   (into #{} (map :lib (vals lib-modules))))
@@ -25,7 +26,8 @@
    'fx/jdbc          'io.github.conjurernix/fx.jdbc
    'fx/ring          'io.github.conjurernix/fx.ring
    'fx/observability 'io.github.conjurernix/fx.observability
-   'fx/schedule      'io.github.conjurernix/fx.schedule})
+   'fx/schedule      'io.github.conjurernix/fx.schedule
+   'fx/http-client   'io.github.conjurernix/fx.http-client})
 
 (defn compute-version
   "Derives version from options or git tags.
@@ -135,7 +137,8 @@
                                "-d" "modules/fx-jdbc/test"
                                "-d" "modules/fx-ring/test"
                                "-d" "modules/fx-observability/test"
-                               "-d" "modules/fx-schedule/test"]})
+                               "-d" "modules/fx-schedule/test"
+                               "-d" "modules/fx-http-client/test"]})
         {:keys [exit]} (b/process cmds)]
     (when-not (zero? exit)
       (throw (ex-info "Tests failed" {:exit exit}))))
@@ -293,15 +296,17 @@
                "modules/fx-jdbc/deps.edn"
                "modules/fx-ring/deps.edn"
                "modules/fx-observability/deps.edn"
+               "modules/fx-schedule/deps.edn"
+               "modules/fx-http-client/deps.edn"
                "deps.edn"]]
     (doseq [f-path files]
       (let [f (io/file f-path)]
         (when (.exists f)
           (let [content (slurp f)
                 updated (-> content
-                            (str/replace #"(io\.github\.conjurernix/fx\.[a-z]+)(\s+\{:mvn/version\s+\")[^\"]+(\"\})"
+                            (str/replace #"(io\.github\.conjurernix/fx\.[a-z\-]+)(\s+\{:mvn/version\s+\")[^\"]+(\"\})"
                                          (str "$1$2" new-version "$3"))
-                            (str/replace #"(fx/(?:core|typed|jdbc|ring|observability))(\s+\{:mvn/version\s+\")[^\"]+(\"\})"
+                            (str/replace #"(fx/(?:core|typed|jdbc|ring|observability|schedule|http-client))(\s+\{:mvn/version\s+\")[^\"]+(\"\})"
                                          (str "$1$2" new-version "$3")))]
             (if (not= content updated)
               (do

@@ -57,7 +57,33 @@
           resp (handler {:message "Table locked" :sqlstate "HY000"})]
       (is (= 500 (:status resp)))
       (is (= {:error "Database Error" :details "Table locked"}
-             (:body resp))))))
+             (:body resp)))))
+
+  (testing ":http/client-error maps to 400/404 response with sanitized details"
+    (let [handler (get routes/failure-map :http/client-error)
+          resp (handler {:status 404 :message "Not found" :request {:url "http://api.com/items"}})]
+      (is (= 404 (:status resp)))
+      (is (= "Upstream Client Error" (get-in resp [:body :error])))
+      (is (= 404 (get-in resp [:body :details :status])))
+      (is (= "http://api.com/items" (get-in resp [:body :details :url])))))
+
+  (testing ":http/server-error maps to 502 Bad Gateway"
+    (let [handler (get routes/failure-map :http/server-error)
+          resp (handler {:status 500 :message "Internal error"})]
+      (is (= 502 (:status resp)))
+      (is (= "Bad Gateway" (get-in resp [:body :error])))))
+
+  (testing ":http/timeout maps to 504 Gateway Timeout"
+    (let [handler (get routes/failure-map :http/timeout)
+          resp (handler {:message "Request timed out"})]
+      (is (= 504 (:status resp)))
+      (is (= "Gateway Timeout" (get-in resp [:body :error])))))
+
+  (testing ":http/connection-error maps to 503 Service Unavailable"
+    (let [handler (get routes/failure-map :http/connection-error)
+          resp (handler {:message "Connection refused"})]
+      (is (= 503 (:status resp)))
+      (is (= "Service Unavailable" (get-in resp [:body :error]))))))
 
 ;; ---------------------------------------------------------------------------
 ;; 2. AST Structure & Handler Inspection (Programs as Data)
@@ -71,6 +97,8 @@
           update-h (routes/update-todo-handler> {:path-params {:id "1"}})
           toggle-h (routes/toggle-todo-handler> {:path-params {:id "1"}})
           delete-h (routes/delete-todo-handler> {:path-params {:id "1"}})
+          import-h (routes/import-remote-todos-handler> {:body-params {:url "http://example.com/todos"}})
+          webhook-h (routes/notify-webhook-handler> {:path-params {:id "1"} :body-params {:webhook-url "http://example.com/hook"}})
           metrics-h (routes/metrics-handler> {})]
 
       (is (fx/effect? list-h))
@@ -79,6 +107,8 @@
       (is (fx/effect? update-h))
       (is (fx/effect? toggle-h))
       (is (fx/effect? delete-h))
+      (is (fx/effect? import-h))
+      (is (fx/effect? webhook-h))
       (is (fx/effect? metrics-h)))))
 
 ;; ---------------------------------------------------------------------------

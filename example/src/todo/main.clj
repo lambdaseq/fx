@@ -1,5 +1,6 @@
 (ns todo.main
   (:require [fx.core :as fx]
+            [fx.http-client :as http]
             [fx.jdbc :as-alias fx.jdbc]
             [fx.layer :as fx-layer]
             [fx.observability.log :as log]
@@ -41,6 +42,15 @@
                     (.close ^Closeable ds)))
                 :db/datasource-close-failed)))))
 
+(defn http-client-layer>
+  "Defines a managed HTTP client layer for fx-http-client."
+  ([]
+   (http-client-layer> {:connect-timeout 5000 :version :http-2}))
+  ([opts]
+   (fx-layer/make> :fx.http-client/client
+     (http/build-client> opts)
+     (fn [_client] (fx/succeed> nil)))))
+
 (defn http-server-layer>
   "Defines a managed HTTP server layer running Ring with embedded Jetty.
    Acquires Jetty server on `:port`; stops Jetty server on release."
@@ -66,7 +76,7 @@
            (log/log-info> "HTTP server layer stopped"))))))
 
 (defn app-layer>
-  "Composes datasource, metrics registry, worker, and HTTP server layers into a complete application system layer."
+  "Composes datasource, metrics registry, http-client, worker, and HTTP server layers into a complete application system layer."
   ([]
    (app-layer> {}))
   ([opts]
@@ -75,10 +85,12 @@
                     (try (Integer/parseInt env-port) (catch Throwable _ nil)))
                   3000)
          db-spec (or (:db-spec opts) db/default-db-spec)
+         client-opts (or (:http-client opts) {:connect-timeout 5000 :version :http-2})
          worker-opts (select-keys opts [:interval-ms :days-old])]
      (fx-layer/compose>
        (metrics-layer>)
        (datasource-layer> db-spec)
+       (http-client-layer> client-opts)
        (worker/worker-layer> worker-opts)
        (http-server-layer> port)))))
 

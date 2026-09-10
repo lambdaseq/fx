@@ -6,6 +6,7 @@ A full-stack functional Clojure REST API demonstrating how to build web services
 - **[fx.jdbc](https://github.com/conjurernix/fx)**: Ambient database connection management and transaction handling.
 - **[fx.ring](https://github.com/conjurernix/fx)**: Declarative Ring HTTP handler wrapping (`wrap-fx`), ambient context injection, and structured failure translation.
 - **[fx.schedule](https://github.com/conjurernix/fx)**: Composable retry policies with exponential backoff & jitter, endpoint rate limiting, and background worker recurrence.
+- **[fx.http-client](https://github.com/conjurernix/fx)**: Declarative outbound HTTP requests, ambient client context resolution, response combinators, and resilient error categorization.
 - **[fx.observability](https://github.com/conjurernix/fx)**: Zero-dependency contextual structured logging (`fx.observability.log`), distributed tracing & W3C context propagation (`fx.observability.trace`), and concurrent in-memory metrics (`fx.observability.metrics`).
 - **[HoneySQL v2](https://github.com/seancorfield/honeysql)**: Data-driven SQL generation.
 - **[Reitit](https://github.com/metosin/reitit)**: Declarative, data-driven HTTP routing.
@@ -126,6 +127,58 @@ Automated maintenance (such as pruning completed todos older than 30 days and in
 
 ---
 
+## Outbound HTTP & Synchronization (`fx.http-client`)
+
+The application integrates `fx.http-client` for declarative outbound HTTP communication:
+
+```
+                          +-----------------------------------+
+                          |  POST /api/todos/import-remote    |
+                          +-----------------+-----------------+
+                                            |
+                                            v
+                          +-----------------------------------+
+                          | fx.http-client/get> (timeout 5s)  |
+                          +-----------------+-----------------+
+                                            |
+                                            v
+                          +-----------------------------------+
+                          | fx.jdbc/with-transaction>         |
+                          | (Batch Insert Todos into SQLite)  |
+                          +-----------------------------------+
+
+                          +-----------------------------------+
+                          | POST /api/todos/:id/notify-webhook|
+                          +-----------------+-----------------+
+                                            |
+                                            v
+                          +-----------------------------------+
+                          | todo.domain/get-todo-by-id>       |
+                          +-----------------+-----------------+
+                                            |
+                                            v
+                          +-----------------------------------+
+                          | fx.http-client/post>              |
+                          | (Exponential Backoff Retries)     |
+                          +-----------------+-----------------+
+                                            |
+                                            v
+                          +-----------------------------------+
+                          | External Webhook Endpoint         |
+                          +-----------------------------------+
+```
+
+### 1. Remote Todo Synchronization (`todo.domain/import-remote-todos>`)
+Fetches remote JSON items from an external endpoint via `http/get>`, normalizes schemas, and batch-inserts valid todos into SQLite within a database transaction boundary (`fx.jdbc/with-transaction>`).
+
+### 2. Resilient Webhook Notifications (`todo.domain/notify-webhook>`)
+Dispatches completion payloads to external webhooks via `http/post>`. Transient network failures (`:http/server-error`, `:http/timeout`, `:http/connection-error`) are automatically retried up to 3 times with exponential backoff and jitter (`todo.resilience/webhook-retry-policy`).
+
+### 3. Managed HTTP Client Layer (`todo.main/http-client-layer>`)
+Outbound HTTP requests resolve ambient client configurations from `:fx.http-client/client` in the execution context, managed cleanly through `app-layer>`.
+
+---
+
 ## Project Structure
 
 ```
@@ -136,21 +189,24 @@ example/
 ├── src/
 │   └── todo/
 │       ├── db.clj          # SQLite datasource, DDL, and HoneySQL queries with retries
-│       ├── domain.clj      # Pure business logic & effect pipelines
+│       ├── domain.clj      # Pure business logic & effect pipelines (CRUD, sync, webhooks)
 │       ├── resilience.clj  # Retry policies, rate limiters, & failure filters
 │       ├── routes.clj      # Reitit router, fx.ring wrapping, rate limiting, & failure map
 │       ├── schema.clj      # Malli schemas, data coercion, & validation
 │       ├── worker.clj      # Background recurring maintenance worker layer
-│       └── main.clj        # Server lifecycle (start-server!, stop-server!, -main)
+│       ├── main.clj        # Server lifecycle (start-server!, stop-server!, -main)
+│       └── examples/
+│           └── http_client_demo.clj # Standalone runnable demo for fx-http-client
 └── test/
     └── todo/
-        ├── api_test.clj        # Integration tests for HTTP endpoints, rate limiting, & fx pipelines
-        ├── db_test.clj         # Tests for database queries, HoneySQL, AST, and context DI
-        ├── domain_test.clj     # Tests for validation short-circuiting, effect mocking, & domain logic
-        ├── resilience_test.clj # Tests for retry policies, backoff steps, & rate limiters
-        ├── routes_test.clj     # Tests for route effect handlers & failure translation map
-        ├── schema_test.clj     # Tests for Malli schemas, coercion, and validation errors
-        └── worker_test.clj     # Tests for background worker recurrence and layer lifecycle
+        ├── api_test.clj           # Integration tests for HTTP endpoints, rate limiting, & fx pipelines
+        ├── db_test.clj            # Tests for database queries, HoneySQL, AST, and context DI
+        ├── domain_test.clj        # Tests for validation short-circuiting, effect mocking, & domain logic
+        ├── external_sync_test.clj # Tests for remote import, webhook resilience, & embedded mock server
+        ├── resilience_test.clj    # Tests for retry policies, backoff steps, & rate limiters
+        ├── routes_test.clj        # Tests for route effect handlers & failure translation map
+        ├── schema_test.clj        # Tests for Malli schemas, coercion, and validation errors
+        └── worker_test.clj        # Tests for background worker recurrence and layer lifecycle
 ```
 
 ---
@@ -199,9 +255,21 @@ cd example
 clojure -M:test -m cognitect.test-runner -d test
 ```
 
-### 3. Interactive HTTP Requests (`test.http`)
+### 3. Run Standalone HTTP Client Demonstration
 
-When the server is running on `http://localhost:3000`, open [`example/test.http`](test.http) in IntelliJ IDEA or your editor's HTTP/REST client to execute requests interactively (CRUD operations, query filtering, and validation error scenarios).
+Execute the standalone demonstration script showcasing basic GET with JSON decoding, resilient POST with retries across transient server errors, ambient client injection, and observability metrics:
+```bash
+# From repository root
+clojure -M:example -m todo.examples.http-client-demo
+
+# Or from example directory
+cd example
+clojure -M -m todo.examples.http-client-demo
+```
+
+### 4. Interactive HTTP Requests (`test.http`)
+
+When the server is running on `http://localhost:3000`, open [`example/test.http`](test.http) in IntelliJ IDEA or your editor's HTTP/REST client to execute requests interactively (CRUD operations, remote import, webhook notification, query filtering, and validation error scenarios).
 
 ---
 
@@ -359,7 +427,50 @@ You can interactively develop and test effects and system layers from the Clojur
   }
   ```
 
-### 8. Query Metrics
+### 8. Import Remote Todos
+- **Endpoint:** `POST /api/todos/import-remote`
+- **Request:**
+  ```bash
+  curl -X POST http://localhost:3000/api/todos/import-remote \
+       -H "Content-Type: application/json" \
+       -d '{"url": "https://jsonplaceholder.typicode.com/todos", "limit": 5}'
+  ```
+- **Response (`200 OK`):**
+  ```json
+  {
+    "imported-count": 2,
+    "todos": [
+      {
+        "id": 1,
+        "title": "delectus aut autem",
+        "description": null,
+        "completed": false,
+        "created-at": "2026-09-08T01:13:00.000Z",
+        "updated-at": "2026-09-08T01:13:00.000Z"
+      }
+    ]
+  }
+  ```
+
+### 9. Dispatch Todo Webhook Notification
+- **Endpoint:** `POST /api/todos/:id/notify-webhook`
+- **Request:**
+  ```bash
+  curl -X POST http://localhost:3000/api/todos/1/notify-webhook \
+       -H "Content-Type: application/json" \
+       -d '{"webhook-url": "https://httpbin.org/post"}'
+  ```
+- **Response (`200 OK`):**
+  ```json
+  {
+    "notified": true,
+    "todo-id": 1,
+    "webhook-url": "https://httpbin.org/post",
+    "remote-status": 200
+  }
+  ```
+
+### 10. Query Metrics
 - **Endpoint:** `GET /api/metrics`
 - **Request:**
   ```bash

@@ -18,6 +18,16 @@
 ;; Failure Translation Map
 ;; ---------------------------------------------------------------------------
 
+(defn- sanitize-http-error [err]
+  (if (map? err)
+    (cond-> {:message (or (:message err) "HTTP request failed")}
+      (:status err)  (assoc :status (:status err))
+      (:headers err) (assoc :headers (:headers err))
+      (:body err)    (assoc :body (:body err))
+      (get-in err [:request :url]) (assoc :url (get-in err [:request :url]))
+      (get-in err [:request :method]) (assoc :method (get-in err [:request :method])))
+    (str err)))
+
 (def failure-map
   {:todo/not-found
    (fn [err]
@@ -53,7 +63,37 @@
    (fn [err]
      {:status 500
       :body   {:error   "Database Error"
-               :details (:message err)}})})
+               :details (:message err)}})
+
+   :http/client-error
+   (fn [err]
+     {:status (or (:status err) 400)
+      :body   {:error   "Upstream Client Error"
+               :details (sanitize-http-error err)}})
+
+   :http/server-error
+   (fn [err]
+     {:status 502
+      :body   {:error   "Bad Gateway"
+               :details (sanitize-http-error err)}})
+
+   :http/timeout
+   (fn [err]
+     {:status 504
+      :body   {:error   "Gateway Timeout"
+               :details (sanitize-http-error err)}})
+
+   :http/connection-error
+   (fn [err]
+     {:status 503
+      :body   {:error   "Service Unavailable"
+               :details (sanitize-http-error err)}})
+
+   :http/error
+   (fn [err]
+     {:status 502
+      :body   {:error   "HTTP Error"
+               :details (sanitize-http-error err)}})})
 
 ;; ---------------------------------------------------------------------------
 ;; Request Helpers
@@ -110,6 +150,21 @@
   (-> (schema/coerce-id> (get-in req [:path-params :id]))
       (fx/mapcat> domain/delete-todo>)
       (fx-resp/ok>)))
+
+(defn import-remote-todos-handler>
+  "Effect handler for `POST /api/todos/import-remote`."
+  [req]
+  (let [payload (extract-payload req)]
+    (-> (domain/import-remote-todos> payload)
+        (fx-resp/ok>))))
+
+(defn notify-webhook-handler>
+  "Effect handler for `POST /api/todos/:id/notify-webhook`."
+  [req]
+  (let [payload (extract-payload req)]
+    (-> (schema/coerce-id> (get-in req [:path-params :id]))
+        (fx/mapcat> (fn [id] (domain/notify-webhook> id payload)))
+        (fx-resp/ok>))))
 
 (defn metrics-handler>
   "Effect handler for `GET /api/metrics`. Returns snapshot of registered in-memory metrics."
@@ -220,12 +275,18 @@
        :post {:handler (if create-limiter
                          (wrap-rate-limit create-todo-handler> create-limiter)
                          create-todo-handler>)}}]
+     ["/todos/import-remote"
+      {:post {:handler (if create-limiter
+                         (wrap-rate-limit import-remote-todos-handler> create-limiter)
+                         import-remote-todos-handler>)}}]
      ["/todos/:id"
       {:get    {:handler get-todo-handler>}
        :put    {:handler update-todo-handler>}
        :delete {:handler delete-todo-handler>}}]
      ["/todos/:id/toggle"
-      {:patch {:handler toggle-todo-handler>}}]]]))
+      {:patch {:handler toggle-todo-handler>}}]
+     ["/todos/:id/notify-webhook"
+      {:post {:handler notify-webhook-handler>}}]]]))
 
 (defn create-app
   "Constructs the complete Ring application with routing, query params parsing,
@@ -237,7 +298,8 @@
    (let [ctx (if (map? ctx-or-opts) ctx-or-opts {})
          limiter (get ctx :todo/rate-limiter (resilience/create-todo-rate-limiter))]
      (-> (ring/ring-handler
-           (ring/router (create-routes limiter))
+           (ring/router (create-routes limiter)
+                        {:conflicts nil})
            (ring/routes
              (ring/create-resource-handler {:path "/"})
              (ring/create-default-handler

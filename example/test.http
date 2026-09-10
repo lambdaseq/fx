@@ -120,6 +120,33 @@ traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
 ###
 
 ### ===========================================================================
+### Outbound HTTP Client Integration & Synchronization Tests
+### ===========================================================================
+
+### 15. Import Remote Todos (POST /api/todos/import-remote)
+POST {{host}}/api/todos/import-remote
+Content-Type: application/json
+Accept: application/json
+
+{
+  "url": "https://jsonplaceholder.typicode.com/todos",
+  "limit": 5
+}
+
+###
+
+### 16. Dispatch Todo Webhook Notification (POST /api/todos/1/notify-webhook)
+POST {{host}}/api/todos/1/notify-webhook
+Content-Type: application/json
+Accept: application/json
+
+{
+  "webhook-url": "https://httpbin.org/post"
+}
+
+###
+
+### ===========================================================================
 ### Error Handling, Validation, and Rate Limiting Tests
 ### ===========================================================================
 

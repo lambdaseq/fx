@@ -5,6 +5,7 @@
                        fx/ring                            {:local/root "./modules/fx-ring"}
                        fx/observability                   {:local/root "./modules/fx-observability"}
                        fx/schedule                        {:local/root "./modules/fx-schedule"}
+                       fx/http-client                     {:local/root "./modules/fx-http-client"}
                        hashp/hashp                        {:mvn/version "0.2.2"}
                        org.typedclojure/typed.clj.checker {:mvn/version "1.4.0"}}}
   :test  {:extra-paths ["./modules/fx-core/test"
@@ -12,7 +13,8 @@
                         "./modules/fx-jdbc/test"
                         "./modules/fx-ring/test"
                         "./modules/fx-observability/test"
-                        "./modules/fx-schedule/test"]
+                        "./modules/fx-schedule/test"
+                        "./modules/fx-http-client/test"]
           :extra-deps  {org.xerial/sqlite-jdbc {:mvn/version "3.53.2.1"}
                         com.h2database/h2      {:mvn/version "2.4.240"}
                         org.clojure/test.check {:mvn/version "1.1.3"}
@@ -25,6 +27,7 @@
                           fx/ring                           {:local/root "./modules/fx-ring"}
                           fx/observability                  {:local/root "./modules/fx-observability"}
                           fx/schedule                       {:local/root "./modules/fx-schedule"}
+                          fx/http-client                    {:local/root "./modules/fx-http-client"}
                           com.github.seancorfield/honeysql  {:mvn/version "2.6.1270"}
                           metosin/reitit-ring               {:mvn/version "0.7.2"}
                           metosin/muuntaja                  {:mvn/version "0.6.10"}
