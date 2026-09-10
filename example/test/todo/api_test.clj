@@ -1,6 +1,7 @@
 (ns todo.api-test
   (:require [clojure.test :refer [deftest is testing]]
             [fx.core :as fx]
+            [fx.observability.metrics :as metrics]
             [muuntaja.core :as m]
             [todo.db :as db]
             [todo.domain :as domain]
@@ -16,8 +17,11 @@
   (let [url (test-db-url)
         ds (db/create-datasource url)
         _ (fx/run-sync! (db/init-db!> ds))
-        app (routes/create-app {:fx.jdbc/datasource ds})]
+        reg (metrics/make-metrics-registry)
+        app (routes/create-app {:fx.jdbc/datasource ds
+                                :fx.observability/metrics-registry reg})]
     {:ds  ds
+     :reg reg
      :app app}))
 
 (defn- parse-response-body [resp]

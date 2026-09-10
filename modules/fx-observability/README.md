@@ -102,6 +102,7 @@ High-performance, lock-free concurrent counters, gauges, and latency timers powe
   (:require [fx.core :as fx]
             [fx.observability.metrics :as metrics]))
 
+(def registry (metrics/make-metrics-registry))
 (def http-requests-counter (metrics/metric-counter "http.requests.total" {:route "/api/orders"}))
 (def db-query-timer (metrics/metric-timer "db.query.duration" {:table "orders"}))
 (def db-pool-gauge (metrics/metric-gauge "db.pool.active" {:pool "main"}))
@@ -110,10 +111,11 @@ High-performance, lock-free concurrent counters, gauges, and latency timers powe
   (-> (metrics/track-duration> db-query-timer
                                (metrics/track-success-count> http-requests-counter
                                                              (query-database> req)))
+      (metrics/with-metrics-registry> registry)
       (fx/run-sync!)))
 
 ;; Query metrics at runtime
-(metrics/metrics-snapshot!)
+(metrics/metrics-snapshot! registry)
 ;; =>
 ;; {:counters {"http.requests.total" {:tags {:route "/api/orders"} :value 1420}}
 ;;  :gauges   {"db.pool.active"       {:tags {:pool "main"} :value 8}}

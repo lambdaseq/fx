@@ -142,6 +142,22 @@
       (is (= {:tags {} :count 2 :sum-ms 20.0 :min-ms 5.0 :max-ms 15.0 :avg-ms 10.0}
              (get-in snap [:timers "latency"]))))))
 
+(deftest no-ambient-registry-test
+  (testing "metric operations without registry in context safely no-op without error"
+    (let [cnt (metrics/metric-counter "orders.placed")
+          gauge (metrics/metric-gauge "active.workers")
+          tmr (metrics/metric-timer "task.duration")]
+      (is (= :ok
+             (-> (fx/succeed> :ok)
+                 (metrics/counter-inc> cnt 2)
+                 (metrics/gauge-set> gauge 15)
+                 (as-> eff
+                   (->> eff
+                        (metrics/track-duration> tmr)
+                        (metrics/track-success-count> cnt)
+                        (metrics/track-failure-count> cnt)))
+                 (fx/run-sync!)))))))
+
 (deftest metrics-layer-test
   (testing "provides managed metrics registry layer and resets on release"
     (let [reg (metrics/make-metrics-registry)

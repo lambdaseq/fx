@@ -102,8 +102,7 @@
   [_req]
   (-> (fx/context>)
       (fx/map> (fn [ctx]
-                 (metrics/metrics-snapshot! (or (:fx.observability/metrics-registry ctx)
-                                               (:fx/metrics-registry ctx)))))
+                 (metrics/metrics-snapshot! (:fx.observability/metrics-registry ctx))))
       (fx-resp/ok>)))
 
 ;; ---------------------------------------------------------------------------
@@ -203,18 +202,20 @@
 (defn create-app
   "Constructs the complete Ring application with routing, query params parsing,
    observability, and Muuntaja JSON formatting middleware.
-   Optionally accepts an ambient context map or datasource to inject via `fx-ring/wrap-fx-context`."
-  [ctx]
-  (-> (ring/ring-handler
-        (ring/router (create-routes))
-        (ring/routes
-          (ring/create-resource-handler {:path "/"})
-          (ring/create-default-handler
-            {:not-found          (constantly {:status 404 :body {:error "Route not found"}})
-             :method-not-allowed (constantly {:status 405 :body {:error "Method not allowed"}})})))
-      (wrap-observability)
-      (fx-ring/wrap-fx-runner)
-      (fx-ring/wrap-fx-failures {:failure-map failure-map})
-      (fx-ring/wrap-fx-context ctx)
-      (params-middleware/wrap-params)
-      (muuntaja-middleware/wrap-format)))
+   Optionally accepts an ambient context map to inject via `fx-ring/wrap-fx-context`."
+  ([]
+   (create-app {}))
+  ([ctx]
+   (-> (ring/ring-handler
+         (ring/router (create-routes))
+         (ring/routes
+           (ring/create-resource-handler {:path "/"})
+           (ring/create-default-handler
+             {:not-found          (constantly {:status 404 :body {:error "Route not found"}})
+              :method-not-allowed (constantly {:status 405 :body {:error "Method not allowed"}})})))
+       (wrap-observability)
+       (fx-ring/wrap-fx-runner)
+       (fx-ring/wrap-fx-failures {:failure-map failure-map})
+       (fx-ring/wrap-fx-context ctx)
+       (params-middleware/wrap-params)
+       (muuntaja-middleware/wrap-format))))

@@ -1,6 +1,7 @@
 (ns todo.routes-test
   (:require [clojure.test :refer [deftest is testing]]
             [fx.core :as fx]
+            [fx.observability.metrics :as metrics]
             [fx.ring.response :as fx-resp]
             [fx.utils :as fxu]
             [todo.db :as db]
@@ -72,7 +73,8 @@
 
 (deftest test-route-handlers-direct-execution
   (let [ds (fresh-test-ds)
-        base-ctx {:fx.jdbc/datasource ds}]
+        base-ctx {:fx.jdbc/datasource ds
+                  :fx.observability/metrics-registry (metrics/make-metrics-registry)}]
 
     (testing "metrics-handler> returns 200 with metrics snapshot map"
       (let [resp (fx/run-sync!

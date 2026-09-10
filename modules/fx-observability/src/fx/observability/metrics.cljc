@@ -97,51 +97,41 @@
   []
   (atom initial-registry-state))
 
-(defonce ^:private global-metrics-registry (make-metrics-registry))
-
 (defn counter-inc!
-  "Increments counter descriptor in registry by `n` (default 1)."
-  ([desc]
-   (counter-inc! global-metrics-registry desc 1))
+  "Increments counter descriptor in `registry` by `n` (default 1)."
   ([registry desc]
    (counter-inc! registry desc 1))
   ([registry desc n]
-   (let [r (or registry global-metrics-registry)
-         k (metric-key desc)
-         amount (long (or n 1))]
-     (swap! r update-in [:counters k] (fnil #(+ % amount) 0)))))
+   (when (and registry desc)
+     (let [k (metric-key desc)
+           amount (long (or n 1))]
+       (swap! registry update-in [:counters k] (fnil #(+ % amount) 0))))))
 
 (defn gauge-set!
-  "Sets gauge descriptor value in registry."
-  ([desc val]
-   (gauge-set! global-metrics-registry desc val))
-  ([registry desc val]
-   (let [r (or registry global-metrics-registry)
-         k (metric-key desc)]
-     (swap! r assoc-in [:gauges k] val))))
+  "Sets gauge descriptor value in `registry`."
+  [registry desc val]
+  (when (and registry desc)
+    (let [k (metric-key desc)]
+      (swap! registry assoc-in [:gauges k] val))))
 
 (defn timer-record!
-  "Records a latency observation in milliseconds into timer descriptor in registry."
-  ([desc duration-ms]
-   (timer-record! global-metrics-registry desc duration-ms))
-  ([registry desc duration-ms]
-   (let [r (or registry global-metrics-registry)
-         k (metric-key desc)]
-     (swap! r update-in [:timers k] update-timer-stats duration-ms))))
+  "Records a latency observation in milliseconds into timer descriptor in `registry`."
+  [registry desc duration-ms]
+  (when (and registry desc)
+    (let [k (metric-key desc)]
+      (swap! registry update-in [:timers k] update-timer-stats duration-ms))))
 
 (defn metrics-snapshot!
   "Returns a pure Clojure map snapshot of all metrics registered in `registry`."
-  ([]
-   (metrics-snapshot! global-metrics-registry))
-  ([registry]
-   (format-metrics-snapshot @(or registry global-metrics-registry))))
+  [registry]
+  (when registry
+    (format-metrics-snapshot @registry)))
 
 (defn reset-metrics!
   "Resets all metric accumulators in `registry` to zero."
-  ([]
-   (reset-metrics! global-metrics-registry))
-  ([registry]
-   (reset! (or registry global-metrics-registry) initial-registry-state)))
+  [registry]
+  (when registry
+    (reset! registry initial-registry-state)))
 
 ;; ---------------------------------------------------------------------------
 ;; Continuation Frames
@@ -157,20 +147,18 @@
     (let [end-nano (current-nano-time)
           duration-ms (/ (double (- end-nano start-nano)) 1000000.0)
           ctx (or current-context context)
-          reg (or (:fx.observability/metrics-registry ctx)
-                  (:fx/metrics-registry ctx)
-                  global-metrics-registry)]
-      (timer-record! reg timer-desc duration-ms)
+          reg (:fx.observability/metrics-registry ctx)]
+      (when reg
+        (timer-record! reg timer-desc duration-ms))
       [nil val current-context stack]))
 
   fx/IUnwindable
   (-unwind [_ _exception _rest-stack]
     (let [end-nano (current-nano-time)
           duration-ms (/ (double (- end-nano start-nano)) 1000000.0)
-          reg (or (:fx.observability/metrics-registry context)
-                  (:fx/metrics-registry context)
-                  global-metrics-registry)]
-      (timer-record! reg timer-desc duration-ms)
+          reg (:fx.observability/metrics-registry context)]
+      (when reg
+        (timer-record! reg timer-desc duration-ms))
       nil)))
 
 (defrecord TrackSuccessCountFrame [counter-desc context]
@@ -178,10 +166,9 @@
   (-resume [_ val current-context stack]
     (when-not (fx/failure? val)
       (let [ctx (or current-context context)
-            reg (or (:fx.observability/metrics-registry ctx)
-                    (:fx/metrics-registry ctx)
-                    global-metrics-registry)]
-        (counter-inc! reg counter-desc 1)))
+            reg (:fx.observability/metrics-registry ctx)]
+        (when reg
+          (counter-inc! reg counter-desc 1))))
     [nil val current-context stack]))
 
 (defrecord TrackFailureCountFrame [counter-desc context]
@@ -189,18 +176,16 @@
   (-resume [_ val current-context stack]
     (when (fx/failure? val)
       (let [ctx (or current-context context)
-            reg (or (:fx.observability/metrics-registry ctx)
-                    (:fx/metrics-registry ctx)
-                    global-metrics-registry)]
-        (counter-inc! reg counter-desc 1)))
+            reg (:fx.observability/metrics-registry ctx)]
+        (when reg
+          (counter-inc! reg counter-desc 1))))
     [nil val current-context stack])
 
   fx/IUnwindable
   (-unwind [_ _exception _rest-stack]
-    (let [reg (or (:fx.observability/metrics-registry context)
-                  (:fx/metrics-registry context)
-                  global-metrics-registry)]
-      (counter-inc! reg counter-desc 1))
+    (let [reg (:fx.observability/metrics-registry context)]
+      (when reg
+        (counter-inc! reg counter-desc 1)))
     nil))
 
 ;; ---------------------------------------------------------------------------
@@ -325,11 +310,9 @@
      (counter-inc> nil counter-desc-or-prev n-or-desc)))
   ([prev-effect counter-desc n]
    (let [eff (fx/map-ctx> (fn [val ctx]
-                            (let [reg (or (:fx.observability/metrics-registry ctx)
-                                          (:fx/metrics-registry ctx)
-                                          global-metrics-registry)]
-                              (counter-inc! reg counter-desc n)
-                              val)))]
+                            (when-let [reg (:fx.observability/metrics-registry ctx)]
+                              (counter-inc! reg counter-desc n))
+                            val))]
      (if prev-effect (fx/chain> prev-effect eff) eff))))
 
 (defn gauge-set>
@@ -341,10 +324,8 @@
    (gauge-set> nil gauge-desc val))
   ([prev-effect gauge-desc val]
    (let [eff (fx/map-ctx> (fn [v ctx]
-                            (let [reg (or (:fx.observability/metrics-registry ctx)
-                                          (:fx/metrics-registry ctx)
-                                          global-metrics-registry)
-                                  gauge-val (if (fn? val) (val v) val)]
-                              (gauge-set! reg gauge-desc gauge-val)
-                              v)))]
+                            (when-let [reg (:fx.observability/metrics-registry ctx)]
+                              (let [gauge-val (if (fn? val) (val v) val)]
+                                (gauge-set! reg gauge-desc gauge-val)))
+                            v))]
      (if prev-effect (fx/chain> prev-effect eff) eff))))
