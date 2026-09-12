@@ -1,13 +1,13 @@
 (ns fx.typed-test
   (:require [clojure.test :refer [deftest testing is]]
             [fx.core :as fx]
-            [fx.core]
             [fx.typed]
-            [typed.clj.checker.test-utils :as tu :refer [tc-e is-tc-e is-tc-err]]
+            [typed.clj.checker.test-utils :as tu :refer [is-tc-e is-tc-err]]
             [typed.clojure :as t]))
 
 (deftest effect?-ann--test
   (testing "effect? returns boolean"
+    #_{:clj-kondo/ignore [:unresolved-var]}
     (is-tc-e (fx/effect? nil)
              Boolean
              :requires [[fx.core :as fx]
@@ -435,6 +435,7 @@
 
 (deftest context>-ann--test
   (testing "context> returns effect yielding context map or extracted key"
+    #_{:clj-kondo/ignore [:unresolved-var]}
     (is-tc-e (fx/context>)
              (fx/IEffect t/Any fx.typed/Context nil '{})
              :requires [[fx.core :as fx]
@@ -513,8 +514,8 @@
   (testing "acquire-release> typing succeeds"
     (is-tc-e (fx/acquire-release>
               (fx/succeed> {:db "conn"})
-              (fn [conn] (fx/succeed> "data"))
-              (fn [conn] (fx/succeed> nil)))
+              (fn [_conn] (fx/succeed> "data"))
+              (fn [_conn] (fx/succeed> nil)))
              (fx/IEffect t/Any String nil '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])))

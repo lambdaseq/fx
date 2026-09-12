@@ -1,20 +1,18 @@
 (ns fx.async.channel
   "First-class core.async channel bridging and stream combinators for fx."
   (:require [clojure.core.async :as async]
-            [fx.async.fiber :as fiber]
+            #?(:clj [fx.async.fiber :as fiber])
             [fx.core :as fx])
-  #?(:clj (:import (java.util.concurrent CompletableFuture
-                                         CountDownLatch
-                                         TimeUnit))))
+  #?(:clj (:import (java.util.concurrent CompletableFuture))))
 
 ;; ---------------------------------------------------------------------------
 ;; Step Effect Frame
 ;; ---------------------------------------------------------------------------
 
 (defrecord StepEffectFrame [effect]
-  fx.core.IContinuation
+  fx/IContinuation
   (-resume [_ val context stack]
-    (fx.core/-step effect val context stack)))
+    (fx/-step effect val context stack)))
 
 ;; ---------------------------------------------------------------------------
 ;; Buffer Helpers
@@ -37,9 +35,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defrecord ChanEffect [tag prev-effect data buf-or-n xform ex-handler]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -70,10 +68,10 @@
 ;; chan-put> Effect Combinator
 ;; ---------------------------------------------------------------------------
 
-(defn- exec-chan-put [ch val context]
+(defn- exec-chan-put [ch val _context]
   #?(:clj
      (let [cf (CompletableFuture.)
-           parent-fiber (:fiber context)]
+           parent-fiber (:fiber _context)]
        (async/put! ch val
                    (fn [accepted?]
                      (.complete cf (boolean accepted?))))
@@ -91,9 +89,9 @@
      (async/put! ch val)))
 
 (defrecord ChanPutEffect [tag prev-effect data target-chan target-val]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -123,25 +121,25 @@
 ;; chan-take> Effect Combinator
 ;; ---------------------------------------------------------------------------
 
-(defn- exec-chan-take [ch timeout-ms timeout-val context]
+(defn- exec-chan-take [_ch _timeout-ms _timeout-val _context]
   #?(:clj
      (let [cf (CompletableFuture.)
-           parent-fiber (:fiber context)]
-       (if (and (number? timeout-ms) (pos? timeout-ms))
-         (let [timeout-ch (async/timeout (long timeout-ms))
-               [val port] (async/alts!! [ch timeout-ch] :priority true)]
+           parent-fiber (:fiber _context)]
+       (if (and (number? _timeout-ms) (pos? _timeout-ms))
+         (let [timeout-ch (async/timeout (long _timeout-ms))
+               [val port] (async/alts!! [_ch timeout-ch] :priority true)]
            (if (identical? port timeout-ch)
-             timeout-val
+             _timeout-val
              val))
          (do
-           (async/take! ch
+           (async/take! _ch
                         (fn [val]
                           (.complete cf val)))
            (when parent-fiber
              (fiber/add-interrupt-handler! parent-fiber
                                            (fn [_reason]
                                              (when-not (.isDone cf)
-                                               (.complete cf (fx/make-failure :async/channel-take-interrupted {:channel ch}))))))
+                                               (.complete cf (fx/make-failure :async/channel-take-interrupted {:channel _ch}))))))
            (try
              (.get cf)
              (catch Throwable e
@@ -151,9 +149,9 @@
      nil))
 
 (defrecord ChanTakeEffect [tag prev-effect data target-chan timeout-ms timeout-val]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -195,9 +193,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defrecord ChanCloseEffect [tag prev-effect data target-chan]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -222,13 +220,13 @@
 ;; chan-alts> Effect Combinator
 ;; ---------------------------------------------------------------------------
 
-(defn- exec-chan-alts [ports opts]
+(defn- exec-chan-alts [_ports _opts]
   #?(:clj
-     (let [priority? (get opts :priority false)
-           timeout-ms (get opts :timeout-ms nil)
-           default-val (get opts :default nil)
-           has-default? (contains? opts :default)
-           ports-vec (cond-> (vec ports)
+     (let [priority? (get _opts :priority false)
+           timeout-ms (get _opts :timeout-ms nil)
+           default-val (get _opts :default nil)
+           has-default? (contains? _opts :default)
+           ports-vec (cond-> (vec _ports)
                        (and timeout-ms (pos? timeout-ms))
                        (conj (async/timeout (long timeout-ms))))]
        (if has-default?
@@ -238,9 +236,9 @@
      nil))
 
 (defrecord ChanAltsEffect [tag prev-effect data ports opts]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -274,13 +272,13 @@
 ;; chan-drain> & chan-pipe> Stream Combinators
 ;; ---------------------------------------------------------------------------
 
-(defn- exec-chan-drain [ch context]
+(defn- exec-chan-drain [_ch _context]
   #?(:clj
      (let [cf (CompletableFuture.)
            results (atom [])
-           parent-fiber (:fiber context)]
+           parent-fiber (:fiber _context)]
        (letfn [(step []
-                 (async/take! ch
+                 (async/take! _ch
                               (fn [val]
                                 (if (nil? val)
                                   (.complete cf @results)
@@ -292,7 +290,7 @@
          (fiber/add-interrupt-handler! parent-fiber
                                        (fn [_reason]
                                          (when-not (.isDone cf)
-                                           (.complete cf (fx/make-failure :async/channel-drain-interrupted {:channel ch}))))))
+                                           (.complete cf (fx/make-failure :async/channel-drain-interrupted {:channel _ch}))))))
        (try
          (.get cf)
          (catch Throwable e
@@ -302,9 +300,9 @@
      nil))
 
 (defrecord ChanDrainEffect [tag prev-effect data target-chan]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -329,9 +327,9 @@
    (->ChanDrainEffect :chan-drain prev-effect {:chan chan} chan)))
 
 (defrecord ChanPipeEffect [tag prev-effect data from-chan to-chan close?]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -362,9 +360,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defrecord ChanPubEffect [tag prev-effect data in-chan topic-fn buf-fn]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -393,9 +391,9 @@
    (->ChanPubEffect :chan-pub prev-effect {:in-chan in-chan :topic-fn topic-fn :buf-fn buf-fn} in-chan topic-fn buf-fn)))
 
 (defrecord ChanSubEffect [tag prev-effect data publication topic out-chan close?]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -421,9 +419,9 @@
    (->ChanSubEffect :chan-sub prev-effect {:publication publication :topic topic :out-chan out-chan :close? close?} publication topic out-chan close?)))
 
 (defrecord ChanUnsubEffect [tag prev-effect data publication topic out-chan]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)

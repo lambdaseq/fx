@@ -1,11 +1,9 @@
 (ns fx.async.fiber
   "Fiber abstraction, supervisor tree, and concurrent execution runners for fx."
-  (:refer-clojure :exclude [await])
   (:require [clojure.core.async :as async]
             [fx.async.protocols :as p]
             [fx.core :as fx])
   #?(:clj (:import (java.util.concurrent CompletableFuture
-                                         ConcurrentHashMap
                                          ExecutorService
                                          Executors
                                          ForkJoinPool
@@ -30,15 +28,14 @@
    (defonce default-thread-pool
      (delay (ForkJoinPool/commonPool))))
 
-(defn- get-executor [context]
-  #?(:clj
+#?(:clj
+   (defn- get-executor [context]
      (or (:executor context)
          (case (:engine context)
            :virtual-threads @default-virtual-executor
            :thread-pool     @default-thread-pool
            :go              nil
-           @default-virtual-executor))
-     :cljs nil))
+           @default-virtual-executor))))
 
 ;; ---------------------------------------------------------------------------
 ;; Fiber Implementation
@@ -97,7 +94,7 @@
   ([]
    (make-fiber nil))
   ([parent-fiber]
-   (->Fiber (str "fiber-" (java.util.UUID/randomUUID))
+   (->Fiber (str "fiber-" #?(:clj (java.util.UUID/randomUUID) :cljs (random-uuid)))
             (atom :running)
             #?(:clj (CompletableFuture.) :cljs (atom nil))
             (atom #{})
@@ -192,13 +189,13 @@
                 (fx/make-failure :fiber/defect cause)))))
         :cljs @(p/fiber-result fiber))
      (fx/make-failure :fiber/invalid-target {:fiber fiber})))
-  ([fiber timeout-ms timeout-val]
+  ([fiber _timeout-ms _timeout-val]
    (if (p/fiber? fiber)
      #?(:clj
         (try
-          (.get ^CompletableFuture (p/fiber-result fiber) (long timeout-ms) TimeUnit/MILLISECONDS)
+          (.get ^CompletableFuture (p/fiber-result fiber) (long _timeout-ms) TimeUnit/MILLISECONDS)
           (catch TimeoutException _
-            timeout-val)
+            _timeout-val)
           (catch Throwable e
             (let [cause (or (.getCause e) e)]
               (if (fx/failure? cause)
@@ -222,14 +219,15 @@
           failure)
         (let [res (try
                     (fx/run-sync! effect context)
-                    (catch InterruptedException _
-                      (compare-and-set! status-atom :running :interrupted)
-                      (fx/make-failure :fiber/interrupted {:fiber-id (.-id fiber)}))
-                    (catch Throwable e
-                      (if (or (instance? InterruptedException (.getCause e))
+                    #?(:clj
+                       (catch InterruptedException _
+                         (compare-and-set! status-atom :running :interrupted)
+                         (fx/make-failure :fiber/interrupted {:fiber-id (.-id fiber)})))
+                    (catch #?(:clj Throwable :cljs :default) e
+                      (if (or #?(:clj (instance? InterruptedException (.getCause e)) :cljs false)
                               (= @status-atom :interrupted))
                         (fx/make-failure :fiber/interrupted {:fiber-id (.-id fiber)})
-                        (fx/make-failure :fiber/defect {:exception e :message (.getMessage e)}))))]
+                        (fx/make-failure :fiber/defect {:exception e :message #?(:clj (.getMessage e) :cljs (str e))}))))]
           (cond
             (= @status-atom :interrupted)
             (let [fail (if (fx/failure? res) res (fx/make-failure :fiber/interrupted {:fiber-id (.-id fiber)}))]
@@ -267,15 +265,15 @@
        (if (= engine :go)
          (async/go
            (execute-fiber-task! fiber effect fiber-ctx))
-         (if-let [^ExecutorService exec (get-executor fiber-ctx)]
-           (.submit exec ^Runnable (fn [] (execute-fiber-task! fiber effect fiber-ctx)))
-           #?(:clj
+         #?(:clj
+            (if-let [^ExecutorService exec (get-executor fiber-ctx)]
+              (.submit exec ^Runnable (fn [] (execute-fiber-task! fiber effect fiber-ctx)))
               (CompletableFuture/supplyAsync
                (reify Supplier
                  (get [_]
-                   (execute-fiber-task! fiber effect fiber-ctx))))
-              :cljs
-              (js/setTimeout (fn [] (execute-fiber-task! fiber effect fiber-ctx)) 0)))))
+                   (execute-fiber-task! fiber effect fiber-ctx)))))
+            :cljs
+            (js/setTimeout (fn [] (execute-fiber-task! fiber effect fiber-ctx)) 0))))
      fiber)))
 
 (defn run-async-chan!

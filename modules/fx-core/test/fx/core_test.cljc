@@ -1,8 +1,8 @@
 (ns fx.core-test
-  (:refer-clojure :exclude [tap>])
+  #?(:clj (:refer-clojure :exclude [tap>]))
   (:require [clojure.string]
-            [clojure.test :refer :all]
-            [fx.core :refer :all]))
+            [clojure.test :refer [deftest is testing]]
+            [fx.core :refer [->StepEffectFrame IContinuation IEffect ITagged acquire-release> all> catch> catchall> cond> context> die> do-ctx> effect? ensure> error-data fail> failure? for-each> if> make-effect make-failure map-ctx> map> mapcat-ctx> mapcat> match> maybe-propagate-failure or-die> or-else-fail> or-else> provide-service> provide> retry> run-async! run-sync! service> sleep> succeed> tag tap-error> tap> try> zip-with> zip>]]))
 
 (deftest make-effect-test
   (let [eff (make-effect :test nil {:a 1})]
@@ -625,7 +625,7 @@
                (acquire-release>
                 (succeed> {:db "conn"})
                 (fn [conn] (succeed> (str (:db conn) "-data")))
-                (fn [conn] (succeed> (reset! released true)))))]
+                (fn [_conn] (succeed> (reset! released true)))))]
       (is (= "conn-data" res))
       (is (true? @released))))
 

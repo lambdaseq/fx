@@ -14,7 +14,7 @@
                   (fn [_] (reset! loser-cancelled? true)))
                  (fx/succeed> :fast)]))]
       (is (= :fast res))
-      (Thread/sleep 100)
+      #?(:clj (Thread/sleep 100))
       (is (true? @loser-cancelled?))))
 
   (testing "race> returns failure if all racers fail"
@@ -40,7 +40,7 @@
                         (fx/try> (fn []
                                    (let [cur (swap! running inc)]
                                      (swap! max-concurrent max cur)
-                                     (Thread/sleep 20)
+                                     #?(:clj (Thread/sleep 20))
                                      (swap! running dec)
                                      i))))
                       (range 10))

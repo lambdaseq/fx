@@ -1,6 +1,5 @@
 (ns fx.schedule-test
-  (:refer-clojure :exclude [identity])
-  (:require [clojure.test :refer :all]
+  (:require [clojure.test :refer [deftest is testing]]
             [fx.core :as fx]
             [fx.schedule :as sched]))
 
@@ -236,7 +235,7 @@
           s (sched/tap-step> (sched/recur-n> 2) (fn [info] (swap! tapped conj info)))
           st0 (sched/-initial-state s)
           step1 (sched/step-schedule! s st0 0 :in)
-          step2 (sched/step-schedule! s (:state step1) 0 :in)]
+          _step2 (sched/step-schedule! s (:state step1) 0 :in)]
       (is (= 2 (count @tapped)))
       (is (= :recur (:decision (first @tapped)))))))
 
@@ -357,7 +356,7 @@
       (is (= :open (sched/circuit-breaker-state breaker)))
 
       ;; Wait for reset timeout
-      #?(:clj (Thread/sleep 60) :cljs nil)
+      #?(:clj (Thread/sleep 60))
 
       ;; Canary call succeeds -> transitions back to closed
       (let [res (fx/run-sync! succ-eff)]

@@ -298,7 +298,7 @@
    (render-execution-trace leaf-effect nil))
   ([leaf-effect failure-or-cause]
    (let [effects (utils/effect-seq leaf-effect)
-         n (count effects)
+         _n (count effects)
          steps (map-indexed (fn [idx eff]
                               (let [step-num (inc idx)
                                     eff-tag (fx/tag eff)

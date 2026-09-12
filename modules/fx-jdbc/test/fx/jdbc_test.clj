@@ -588,13 +588,13 @@
                                            (-> (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 200 WHERE id = 1"])
                                                (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance + 200 WHERE id = 2"])))
                                                (fx/tap> (fn [_] (swap! events conj [:tx-executed :tx-1])))))))
-                           (fx/ensure> (fx/map> (fn [_] (swap! events conj [:tx-finalized :tx-1])))))]
-        (let [res (fx/run-sync! tx-success)]
-          (is (vector? res))
-          (is (= [[:start-tx :tx-1]
-                  [:tx-executed :tx-1]
-                  [:tx-finalized :tx-1]]
-                 @events))))
+                           (fx/ensure> (fx/map> (fn [_] (swap! events conj [:tx-finalized :tx-1])))))
+            res (fx/run-sync! tx-success)]
+        (is (vector? res))
+        (is (= [[:start-tx :tx-1]
+                [:tx-executed :tx-1]
+                [:tx-finalized :tx-1]]
+               @events)))
 
       ;; 2. Failed transaction monitored via ensure> and catch>
       (reset! events [])
@@ -609,19 +609,19 @@
                            (fx/catch> {:transfer/limit-exceeded
                                        (fx/map> (fn [err]
                                                   (swap! events conj [:rollback-monitored err])
-                                                  {:handled true :err err}))}))]
-        (let [res (fx/run-sync! tx-failure)
-              balances (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
-                                                            {:builder-fn fx-jdbc/as-unqualified-lower-maps})
-                                         (fx-jdbc/provide-datasource> ds)))]
-          (is (= {:handled true :err {:amount 500}} res))
-          ;; Verify DB state was rolled back
-          (is (= [{:id 1 :balance 800} {:id 2 :balance 700}] balances))
-          ;; Verify monitoring captured start, finalization, and rollback handling
-          (is (= [[:start-tx :tx-2]
-                  [:tx-finalized :tx-2]
-                  [:rollback-monitored {:amount 500}]]
-                 @events))))))
+                                                  {:handled true :err err}))}))
+            res (fx/run-sync! tx-failure)
+            balances (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
+                                                          {:builder-fn fx-jdbc/as-unqualified-lower-maps})
+                                       (fx-jdbc/provide-datasource> ds)))]
+        (is (= {:handled true :err {:amount 500}} res))
+        ;; Verify DB state was rolled back
+        (is (= [{:id 1 :balance 800} {:id 2 :balance 700}] balances))
+        ;; Verify monitoring captured start, finalization, and rollback handling
+        (is (= [[:start-tx :tx-2]
+                [:tx-finalized :tx-2]
+                [:rollback-monitored {:amount 500}]]
+               @events)))))
 
   (testing "nested savepoint rollback with outer transaction recovery and audit logging"
     (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))
@@ -652,20 +652,20 @@
                          (fx/catch> {:transfer/fraud-detected
                                      (fx/mapcat> (fn [err]
                                                    (swap! audit-log conj [:inner-rolled-back err])
-                                                   (fx-jdbc/execute!> ["UPDATE transfer_audit SET status = ?, note = ? WHERE id = ?" "failed" "Fraud detected on target" 101])))}))))))]
-        (let [res (fx/run-sync! workflow)
-              balances (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
-                                                            {:builder-fn fx-jdbc/as-unqualified-lower-maps})
-                                         (fx-jdbc/provide-datasource> ds)))
-              audit-records (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT * FROM transfer_audit WHERE id = ?" 101]
-                                                                 {:builder-fn fx-jdbc/as-unqualified-lower-maps})
-                                              (fx-jdbc/provide-datasource> ds)))]
-          (is (vector? res))
-          ;; Account 1 was deducted, Account 2 was NOT incremented (rolled back to savepoint)
-          (is (= [{:id 1 :balance 950} {:id 2 :balance 500}] balances))
-          ;; Audit record reflects the failure recorded by outer transaction
-          (is (= [{:id 101 :status "failed" :note "Fraud detected on target"}] audit-records))
-          (is (= [[:inner-rolled-back {:account 2 :reason "suspicious activity"}]] @audit-log))))))
+                                                   (fx-jdbc/execute!> ["UPDATE transfer_audit SET status = ?, note = ? WHERE id = ?" "failed" "Fraud detected on target" 101])))}))))))
+            res (fx/run-sync! workflow)
+            balances (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
+                                                          {:builder-fn fx-jdbc/as-unqualified-lower-maps})
+                                       (fx-jdbc/provide-datasource> ds)))
+            audit-records (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT * FROM transfer_audit WHERE id = ?" 101]
+                                                               {:builder-fn fx-jdbc/as-unqualified-lower-maps})
+                                            (fx-jdbc/provide-datasource> ds)))]
+        (is (vector? res))
+        ;; Account 1 was deducted, Account 2 was NOT incremented (rolled back to savepoint)
+        (is (= [{:id 1 :balance 950} {:id 2 :balance 500}] balances))
+        ;; Audit record reflects the failure recorded by outer transaction
+        (is (= [{:id 101 :status "failed" :note "Fraud detected on target"}] audit-records))
+        (is (= [[:inner-rolled-back {:account 2 :reason "suspicious activity"}]] @audit-log)))))
 
   (testing "multi-level nested transaction rollback across multiple savepoints"
     (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))]
@@ -692,15 +692,15 @@
                                       (fx-jdbc/execute!> ["UPDATE accounts SET balance = balance - 30 WHERE id = 2"]))))
                                   ;; Level 2 fails after Level 3
                                  (fx/mapcat> (fn [_] (fx/fail> :level-2/aborted "aborting level 2")))))
-                           (fx/catch> {:level-2/aborted (fx/succeed> :level-2-caught)})))))))]
-        (let [res (fx/run-sync! multi-level-tx)
-              balances (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
-                                                            {:builder-fn fx-jdbc/as-unqualified-lower-maps})
-                                         (fx-jdbc/provide-datasource> ds)))]
-          (is (= :level-2-caught res))
-          ;; Only Level 1 change (Alice -10: 1000 -> 990) was committed.
-          ;; Bob's balance remains 500 (both Level 2 and Level 3 rolled back).
-          (is (= [{:id 1 :balance 990} {:id 2 :balance 500}] balances))))))
+                           (fx/catch> {:level-2/aborted (fx/succeed> :level-2-caught)})))))))
+            res (fx/run-sync! multi-level-tx)
+            balances (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
+                                                          {:builder-fn fx-jdbc/as-unqualified-lower-maps})
+                                       (fx-jdbc/provide-datasource> ds)))]
+        (is (= :level-2-caught res))
+        ;; Only Level 1 change (Alice -10: 1000 -> 990) was committed.
+        ;; Bob's balance remains 500 (both Level 2 and Level 3 rolled back).
+        (is (= [{:id 1 :balance 990} {:id 2 :balance 500}] balances)))))
 
   (testing "connection attribute restoration after transaction rollback"
     (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))
@@ -740,20 +740,20 @@
                    (fx/catch> {:jdbc/error
                                (fx/map> (fn [err-data]
                                           (reset! monitored-error err-data)
-                                          :error-monitored-and-handled))}))]
-        (let [res (fx/run-sync! tx)
-              balances (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
-                                                            {:builder-fn fx-jdbc/as-unqualified-lower-maps})
-                                         (fx-jdbc/provide-datasource> ds)))]
-          (is (= :error-monitored-and-handled res))
-          ;; Verify DB update on Alice was rolled back
-          (is (= [{:id 1 :balance 1000} {:id 2 :balance 500}] balances))
-          ;; Verify error metadata was captured
-          (is (some? @monitored-error))
-          (is (some? (:message @monitored-error)))
-          (is (some? (:sqlstate @monitored-error)))
-          (is (= ["INSERT INTO accounts (id, name, balance) VALUES (?, ?, ?)" 1 "Duplicate Alice" 2000]
-                 (:statement @monitored-error)))))))
+                                          :error-monitored-and-handled))}))
+            res (fx/run-sync! tx)
+            balances (fx/run-sync! (-> (fx-jdbc/execute!> ["SELECT id, balance FROM accounts ORDER BY id ASC"]
+                                                          {:builder-fn fx-jdbc/as-unqualified-lower-maps})
+                                       (fx-jdbc/provide-datasource> ds)))]
+        (is (= :error-monitored-and-handled res))
+        ;; Verify DB update on Alice was rolled back
+        (is (= [{:id 1 :balance 1000} {:id 2 :balance 500}] balances))
+        ;; Verify error metadata was captured
+        (is (some? @monitored-error))
+        (is (some? (:message @monitored-error)))
+        (is (some? (:sqlstate @monitored-error)))
+        (is (= ["INSERT INTO accounts (id, name, balance) VALUES (?, ?, ?)" 1 "Duplicate Alice" 2000]
+               (:statement @monitored-error))))))
 
   (testing "IUnwindable rollback during unhandled execution unwinding"
     (let [ds (fx/run-sync! (fx-jdbc/get-datasource> h2-db-spec))

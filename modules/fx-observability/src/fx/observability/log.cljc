@@ -26,8 +26,9 @@
   (try
     (let [formatted (format-log-entry entry)]
       (if (= (:level entry) :error)
-        (binding [*out* *err*]
-          (println formatted))
+        #?(:clj (binding [*out* *err*]
+                  (println formatted))
+           :cljs (js/console.error formatted))
         (println formatted)))
     (catch #?(:clj Throwable :cljs :default) _ nil)))
 

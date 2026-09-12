@@ -93,13 +93,13 @@
   (testing "logs correctly in async pipelines"
     (let [logs (atom [])
           sink (fn [e] (swap! logs conj e))
-          fut (-> (fx/succeed> 5)
-                  (log/annotate-logs> {:trace "async-1"})
-                  (log/log-info> "Async start")
-                  (fx/map> (fn [v] (* v 3)))
-                  (log/log-info> "Async finish")
-                  (fx/run-async! {:fx.observability/logger sink}))
-          res #?(:clj @fut :cljs nil)]
+          _fut (-> (fx/succeed> 5)
+                   (log/annotate-logs> {:trace "async-1"})
+                   (log/log-info> "Async start")
+                   (fx/map> (fn [v] (* v 3)))
+                   (log/log-info> "Async finish")
+                   (fx/run-async! {:fx.observability/logger sink}))
+          res #?(:clj @_fut :cljs nil)]
       (is (= 15 res))
       (is (= 2 (count @logs)))
       (is (= {:trace "async-1"} (:annotations (first @logs))))

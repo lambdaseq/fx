@@ -1,6 +1,5 @@
 (ns fx.async.protocols
-  "Core protocols for fibers, queues, coordination, and async communication in fx."
-  #?(:clj (:import (java.util.concurrent CompletableFuture))))
+  "Core protocols for fibers, queues, coordination, and async communication in fx.")
 
 ;; ---------------------------------------------------------------------------
 ;; Fiber Protocol

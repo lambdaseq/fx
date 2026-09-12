@@ -1,7 +1,6 @@
 (ns fx.utils
   "Pure utility functions for inspecting, querying, traversing, transforming,
    reconstructing, and composing Effect pipelines and ASTs."
-  (:refer-clojure :exclude [comp])
   (:require [fx.core :as fx]))
 
 ;; ---------------------------------------------------------------------------
@@ -275,7 +274,7 @@
    and an `after-eff-fn`, while preserving the stage's computed value."
   [before-eff-fn after-eff-fn]
   (fn [target-eff]
-    (let [v-sym (gensym "val")]
+    (let [_v-sym (gensym "val")]
       (-> target-eff
           (fx/mapcat> (fn [v]
                         (-> (before-eff-fn v)

@@ -30,7 +30,7 @@
 (defn- test-handler [^HttpExchange exchange]
   (try
     (let [method-str (.getRequestMethod exchange)
-          method     (keyword (str/lower-case method-str))
+          _method    (keyword (str/lower-case method-str))
           uri        (.getRequestURI exchange)
           path       (.getPath uri)
           query-str  (.getQuery uri)

@@ -11,7 +11,8 @@
   fx.observability.trace
   {:linters {:unresolved-symbol {:exclude [format]}}}
   fx.typed-test
-  {:linters {:unresolved-symbol {:exclude [Boolean Long String fx]}}}
+  {:linters {:unresolved-symbol {:exclude [Boolean Long String fx]}
+             :unresolved-var {:level :off}}}
   fx.async.fiber-test
   {:linters {:unresolved-symbol {:exclude [promise deliver]}}}
   fx.async.parallel-test

@@ -1,5 +1,5 @@
 (ns fx.typed
-  (:require [fx.core :as fx]
+  (:require ^:clj-kondo/ignore [fx.core :as fx]
             [typed.clojure :as t]))
 
 (t/defalias Context '{})

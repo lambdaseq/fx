@@ -1,44 +1,39 @@
 (ns fx.async.coordination
   "High-level async coordination and synchronization primitives for fx:
    Queues, Hubs, Deferreds, Semaphores, Latches, and Refs."
-  (:refer-clojure :exclude [await ref])
+  (:refer-clojure :exclude [ref])
   (:require [clojure.core.async :as async]
-            [fx.async.fiber :as fiber]
             [fx.async.protocols :as p]
             [fx.core :as fx])
   #?(:clj (:import (java.util.concurrent CompletableFuture
-                                         ConcurrentHashMap
                                          ConcurrentLinkedQueue
                                          CountDownLatch
                                          Semaphore
-                                         TimeUnit
-                                         atomic.AtomicBoolean
-                                         atomic.AtomicInteger
-                                         atomic.AtomicLong
-                                         atomic.AtomicReference))))
+                                         TimeUnit))))
 
 ;; ---------------------------------------------------------------------------
 ;; Step Effect Frame
 ;; ---------------------------------------------------------------------------
 
 (defrecord StepEffectFrame [effect]
-  fx.core.IContinuation
+  fx/IContinuation
   (-resume [_ val context stack]
-    (fx.core/-step effect val context stack)))
+    (fx/-step effect val context stack)))
 
 ;; ---------------------------------------------------------------------------
 ;; 1. Async Queues Implementation
 ;; ---------------------------------------------------------------------------
 
-(deftype UnboundedBuffer [^java.util.Queue q]
-  clojure.core.async.impl.protocols.Buffer
-  (full? [_] false)
-  (remove! [_] (.poll q))
-  (add!* [this item] (.offer q item) this)
-  (close-buf! [_] nil)
-  clojure.core.async.impl.protocols.UnblockingBuffer
-  clojure.lang.Counted
-  (count [_] (.size q)))
+#?(:clj
+   (deftype UnboundedBuffer [^java.util.Queue q]
+     clojure.core.async.impl.protocols.Buffer
+     (full? [_] false)
+     (remove! [_] (.poll q))
+     (add!* [this item] (.offer q item) this)
+     (close-buf! [_] nil)
+     clojure.core.async.impl.protocols.UnblockingBuffer
+     clojure.lang.Counted
+     (count [_] (.size q))))
 
 (deftype AsyncQueue [chan capacity closed? size-atom]
   p/IQueue
@@ -50,7 +45,7 @@
           (swap! size-atom inc))
         (boolean res))))
   (-queue-take! [_]
-    (let [res (async/<!! chan)]
+    (let [res #?(:clj (async/<!! chan) :cljs (async/poll! chan))]
       (when (some? res)
         (swap! size-atom (fn [s] (max 0 (dec s)))))
       res))
@@ -75,14 +70,15 @@
               :bounded   (async/chan (async/buffer (int capacity)))
               :sliding   (async/chan (async/sliding-buffer (int capacity)))
               :dropping  (async/chan (async/dropping-buffer (int capacity)))
-              :unbounded (async/chan (->UnboundedBuffer (ConcurrentLinkedQueue.)))
+              :unbounded #?(:clj (async/chan (->UnboundedBuffer (ConcurrentLinkedQueue.)))
+                            :cljs (async/chan))
               (async/chan (int capacity)))]
      (->AsyncQueue ch capacity (atom false) (atom 0)))))
 
 (defrecord QueueConstructorEffect [tag prev-effect data buffer-type capacity]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -134,9 +130,9 @@
 ;; Queue Operation Effects
 
 (defrecord QueueOfferEffect [tag prev-effect data queue item]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -159,9 +155,9 @@
    (->QueueOfferEffect :queue-offer prev-effect {:queue queue :item item} queue item)))
 
 (defrecord QueueTakeEffect [tag prev-effect data queue]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -183,9 +179,9 @@
    (->QueueTakeEffect :queue-take prev-effect {:queue queue} queue)))
 
 (defrecord QueuePollEffect [tag prev-effect data queue]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -207,9 +203,9 @@
    (->QueuePollEffect :queue-poll prev-effect {:queue queue} queue)))
 
 (defrecord QueueSizeEffect [tag prev-effect data queue]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -231,9 +227,9 @@
    (->QueueSizeEffect :queue-size prev-effect {:queue queue} queue)))
 
 (defrecord QueueShutdownEffect [tag prev-effect data queue]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -268,7 +264,7 @@
         (doseq [sub subs]
           (p/-queue-offer! sub item))
         count)))
-  (-hub-subscribe! [this]
+  (-hub-subscribe! [_]
     (if @closed?
       nil
       (let [sub (make-queue :sliding capacity)]
@@ -295,9 +291,9 @@
    (->AsyncHub capacity (atom #{}) (atom false))))
 
 (defrecord HubConstructorEffect [tag prev-effect data capacity]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -318,9 +314,9 @@
    (->HubConstructorEffect :hub-bounded prev-effect {:capacity capacity} capacity)))
 
 (defrecord HubPublishEffect [tag prev-effect data hub item]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -343,9 +339,9 @@
    (->HubPublishEffect :hub-publish prev-effect {:hub hub :item item} hub item)))
 
 (defrecord HubSubscribeEffect [tag prev-effect data hub]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -367,9 +363,9 @@
    (->HubSubscribeEffect :hub-subscribe prev-effect {:hub hub} hub)))
 
 (defrecord HubUnsubscribeEffect [tag prev-effect data hub sub-queue]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -390,9 +386,9 @@
    (->HubUnsubscribeEffect :hub-unsubscribe prev-effect {:hub hub :sub-queue sub-queue} hub sub-queue)))
 
 (defrecord HubSubscriberCountEffect [tag prev-effect data hub]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -414,9 +410,9 @@
    (->HubSubscriberCountEffect :hub-subscriber-count prev-effect {:hub hub} hub)))
 
 (defrecord HubShutdownEffect [tag prev-effect data hub]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -441,31 +437,40 @@
 ;; 3. Async Deferred (Single-Assignment Promise) Implementation
 ;; ---------------------------------------------------------------------------
 
-(deftype DeferredCell [^CompletableFuture cf]
+(deftype DeferredCell [#?(:clj ^CompletableFuture cf :cljs cell)]
   p/IDeferred
   (-deferred-succeed! [_ val]
-    (.complete cf val))
+    #?(:clj (.complete cf val)
+       :cljs (reset! cell {:done true :val val})))
   (-deferred-fail! [_ failure-or-err]
     (let [f (if (fx/failure? failure-or-err)
               failure-or-err
               (fx/make-failure :deferred/failed failure-or-err))]
-      (.complete cf f)))
+      #?(:clj (.complete cf f)
+         :cljs (reset! cell {:done true :val f}))))
   (-deferred-await! [_]
-    (try
-      (.get cf)
-      (catch Throwable e
-        (let [c (or (.getCause e) e)]
-          (if (fx/failure? c) c (fx/make-failure :deferred/defect c))))))
-  (-deferred-await! [_ timeout-ms timeout-val]
-    (try
-      (.get cf (long timeout-ms) TimeUnit/MILLISECONDS)
-      (catch java.util.concurrent.TimeoutException _
-        timeout-val)
-      (catch Throwable e
-        (let [c (or (.getCause e) e)]
-          (if (fx/failure? c) c (fx/make-failure :deferred/defect c))))))
+    #?(:clj
+       (try
+         (.get cf)
+         (catch Throwable e
+           (let [c (or (.getCause e) e)]
+             (if (fx/failure? c) c (fx/make-failure :deferred/defect c)))))
+       :cljs
+       (:val @cell)))
+  (-deferred-await! [_ _timeout-ms _timeout-val]
+    #?(:clj
+       (try
+         (.get cf (long _timeout-ms) TimeUnit/MILLISECONDS)
+         (catch java.util.concurrent.TimeoutException _
+           _timeout-val)
+         (catch Throwable e
+           (let [c (or (.getCause e) e)]
+             (if (fx/failure? c) c (fx/make-failure :deferred/defect c)))))
+       :cljs
+       (:val @cell)))
   (-deferred-completed? [_]
-    (.isDone cf))
+    #?(:clj (.isDone cf)
+       :cljs (boolean (:done @cell))))
 
   #?@(:clj
       [clojure.lang.IDeref
@@ -483,12 +488,12 @@
 (defn make-deferred
   "Creates a new uncompleted `IDeferred` instance."
   []
-  (->DeferredCell (CompletableFuture.)))
+  (->DeferredCell #?(:clj (CompletableFuture.) :cljs (atom {:done false}))))
 
 (defrecord DeferredConstructorEffect [tag prev-effect data]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -503,9 +508,9 @@
    (->DeferredConstructorEffect :deferred prev-effect {})))
 
 (defrecord DeferredSucceedEffect [tag prev-effect data deferred value]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -528,9 +533,9 @@
    (->DeferredSucceedEffect :deferred-succeed prev-effect {:deferred deferred :value value} deferred value)))
 
 (defrecord DeferredFailEffect [tag prev-effect data deferred failure-or-err]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -553,9 +558,9 @@
    (->DeferredFailEffect :deferred-fail prev-effect {:deferred deferred :err failure-or-err} deferred failure-or-err)))
 
 (defrecord DeferredAwaitEffect [tag prev-effect data deferred timeout-ms timeout-val]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -595,40 +600,54 @@
 ;; 4. Async Semaphore Implementation
 ;; ---------------------------------------------------------------------------
 
-(deftype SemaphoreCell [^Semaphore sem]
+(deftype SemaphoreCell [#?(:clj ^Semaphore sem :cljs sem-atom)]
   p/ISemaphore
   (-sem-acquire! [_]
-    (.acquire sem)
-    true)
+    #?(:clj (do (.acquire sem) true)
+       :cljs (do (swap! sem-atom dec) true)))
   (-sem-acquire! [_ n]
-    (.acquire sem (int n))
-    true)
+    #?(:clj (do (.acquire sem (int n)) true)
+       :cljs (do (swap! sem-atom (fn [curr] (- curr n))) true)))
   (-sem-try-acquire! [_]
-    (.tryAcquire sem))
+    #?(:clj (.tryAcquire sem)
+       :cljs (let [res (atom false)]
+               (swap! sem-atom (fn [curr]
+                                 (if (pos? curr)
+                                   (do (reset! res true) (dec curr))
+                                   curr)))
+               @res)))
   (-sem-try-acquire! [_ n]
-    (.tryAcquire sem (int n)))
-  (-sem-try-acquire! [_ n timeout-ms]
-    (.tryAcquire sem (int n) (long timeout-ms) TimeUnit/MILLISECONDS))
+    #?(:clj (.tryAcquire sem (int n))
+       :cljs (let [res (atom false)]
+               (swap! sem-atom (fn [curr]
+                                 (if (>= curr n)
+                                   (do (reset! res true) (- curr n))
+                                   curr)))
+               @res)))
+  (-sem-try-acquire! [_ _n _timeout-ms]
+    #?(:clj (.tryAcquire sem (int _n) (long _timeout-ms) TimeUnit/MILLISECONDS)
+       :cljs false))
   (-sem-release! [_]
-    (.release sem)
-    true)
+    #?(:clj (do (.release sem) true)
+       :cljs (do (swap! sem-atom inc) true)))
   (-sem-release! [_ n]
-    (.release sem (int n))
-    true)
+    #?(:clj (do (.release sem (int n)) true)
+       :cljs (do (swap! sem-atom (fn [curr] (+ curr n))) true)))
   (-sem-available-permits [_]
-    (.availablePermits sem)))
+    #?(:clj (.availablePermits sem)
+       :cljs @sem-atom)))
 
 (defn make-semaphore
   "Creates a counting semaphore with `permits`."
   ([]
    (make-semaphore 1))
   ([permits]
-   (->SemaphoreCell (Semaphore. (int permits)))))
+   (->SemaphoreCell #?(:clj (Semaphore. (int permits)) :cljs (atom (int permits))))))
 
 (defrecord SemaphoreConstructorEffect [tag prev-effect data permits]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -649,9 +668,9 @@
    (->SemaphoreConstructorEffect :semaphore prev-effect {:permits permits} permits)))
 
 (defrecord SemaphoreAcquireEffect [tag prev-effect data sem n]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -678,9 +697,9 @@
    (->SemaphoreAcquireEffect :semaphore-acquire prev-effect {:sem sem :n n} sem n)))
 
 (defrecord SemaphoreReleaseEffect [tag prev-effect data sem n]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -707,9 +726,9 @@
    (->SemaphoreReleaseEffect :semaphore-release prev-effect {:sem sem :n n} sem n)))
 
 (defrecord SemaphoreAvailablePermitsEffect [tag prev-effect data sem]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -745,28 +764,30 @@
 ;; 5. Async Countdown Latch Implementation
 ;; ---------------------------------------------------------------------------
 
-(deftype LatchCell [^CountDownLatch latch initial-count]
+(deftype LatchCell [#?(:clj ^CountDownLatch latch :cljs latch-atom) initial-count]
   p/ILatch
   (-latch-count-down! [_]
-    (.countDown latch)
-    true)
+    #?(:clj (do (.countDown latch) true)
+       :cljs (do (swap! latch-atom (fn [c] (max 0 (dec c)))) true)))
   (-latch-await! [_]
-    (.await latch)
-    true)
-  (-latch-await! [_ timeout-ms]
-    (.await latch (long timeout-ms) TimeUnit/MILLISECONDS))
+    #?(:clj (do (.await latch) true)
+       :cljs (zero? @latch-atom)))
+  (-latch-await! [_ _timeout-ms]
+    #?(:clj (.await latch (long _timeout-ms) TimeUnit/MILLISECONDS)
+       :cljs (zero? @latch-atom)))
   (-latch-get-count [_]
-    (.getCount latch)))
+    #?(:clj (.getCount latch)
+       :cljs @latch-atom)))
 
 (defn make-latch
   "Creates a countdown latch with initial `count`."
   [count]
-  (->LatchCell (CountDownLatch. (int count)) count))
+  (->LatchCell #?(:clj (CountDownLatch. (int count)) :cljs (atom (int count))) count))
 
 (defrecord LatchConstructorEffect [tag prev-effect data count]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -785,9 +806,9 @@
    (->LatchConstructorEffect :countdown-latch prev-effect {:count count} count)))
 
 (defrecord LatchCountDownEffect [tag prev-effect data latch]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -809,9 +830,9 @@
    (->LatchCountDownEffect :latch-count-down prev-effect {:latch latch} latch)))
 
 (defrecord LatchAwaitEffect [tag prev-effect data latch timeout-ms]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -840,9 +861,9 @@
    (->LatchAwaitEffect :latch-await prev-effect {:latch latch :timeout-ms timeout-ms} latch timeout-ms)))
 
 (defrecord LatchGetCountEffect [tag prev-effect data latch]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -903,9 +924,9 @@
    (->RefCell (atom initial-val))))
 
 (defrecord RefConstructorEffect [tag prev-effect data initial-val]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -926,9 +947,9 @@
    (->RefConstructorEffect :ref prev-effect {:initial-val initial-val} initial-val)))
 
 (defrecord RefGetEffect [tag prev-effect data ref]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -950,9 +971,9 @@
    (->RefGetEffect :ref-get prev-effect {:ref ref} ref)))
 
 (defrecord RefSetEffect [tag prev-effect data ref new-val]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -975,9 +996,9 @@
    (->RefSetEffect :ref-set prev-effect {:ref ref :new-val new-val} ref new-val)))
 
 (defrecord RefUpdateEffect [tag prev-effect data ref f]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)

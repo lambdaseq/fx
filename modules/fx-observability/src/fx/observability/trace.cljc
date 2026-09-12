@@ -3,8 +3,7 @@
   (:require [clojure.string :as str]
             [fx.core :as fx]
             [fx.layer :as fx-layer])
-  #?(:clj (:import (java.util UUID)
-                   (java.util.concurrent ThreadLocalRandom))))
+  #?(:clj (:import (java.util.concurrent ThreadLocalRandom))))
 
 ;; ---------------------------------------------------------------------------
 ;; ID Generation & Formatting
@@ -62,10 +61,12 @@
   ([trace-id span-id]
    (format-traceparent trace-id span-id true))
   ([trace-id span-id sampled?]
-   (format "00-%s-%s-%s"
-           (or trace-id (random-trace-id))
-           (or span-id (random-span-id))
-           (if sampled? "01" "00"))))
+   (str "00-"
+        (or trace-id (random-trace-id))
+        "-"
+        (or span-id (random-span-id))
+        "-"
+        (if sampled? "01" "00"))))
 
 (defn extract-trace-context
   "Extracts W3C trace context from incoming request/carrier map (checks :headers, string/keyword keys)."
@@ -134,7 +135,7 @@
         [nil val next-ctx stack])))
 
   fx/IUnwindable
-  (-unwind [_ exception rest-stack]
+  (-unwind [_ exception _rest-stack]
     (let [end-nano (current-nano-time)
           duration-ms (/ (double (- end-nano start-nano)) 1000000.0)
           completed-span {:name        span-name
@@ -295,7 +296,7 @@
   ([carrier]
    (extract-trace-context> nil carrier))
   ([prev-effect carrier]
-   (-> (fx/map-ctx> (fn [val ctx]
+   (-> (fx/map-ctx> (fn [val _ctx]
                       (let [in-carrier (or carrier val)
                             extracted (extract-trace-context in-carrier)]
                         [val extracted])))

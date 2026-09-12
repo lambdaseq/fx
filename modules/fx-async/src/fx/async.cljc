@@ -1,20 +1,15 @@
 (ns fx.async
   "Structured concurrency, fibers, parallel combinators, and execution scopes for fx."
-  (:refer-clojure :exclude [await ref])
-  (:require [clojure.core.async :as async]
-            [fx.async.channel :as channel]
+  (:refer-clojure :exclude [ref])
+  (:require [fx.async.channel :as channel]
             [fx.async.coordination :as coord]
             [fx.async.fiber :as fiber]
             [fx.async.protocols :as p]
             [fx.core :as fx])
   #?(:clj (:import (java.util.concurrent CompletableFuture
                                          CountDownLatch
-                                         ExecutorService
-                                         Executors
-                                         ForkJoinPool
-                                         Semaphore
-                                         TimeUnit
-                                         atomic.AtomicReferenceArray))))
+                                         Semaphore)
+                   (java.util.concurrent.atomic AtomicReferenceArray))))
 
 ;; ---------------------------------------------------------------------------
 ;; Re-exported Protocols & Predicates & Runners
@@ -107,18 +102,18 @@
 ;; ---------------------------------------------------------------------------
 
 (defrecord StepEffectFrame [effect]
-  fx.core.IContinuation
+  fx/IContinuation
   (-resume [_ val context stack]
-    (fx.core/-step effect val context stack)))
+    (fx/-step effect val context stack)))
 
 ;; ---------------------------------------------------------------------------
 ;; Fiber Lifecycle Effect Records
 ;; ---------------------------------------------------------------------------
 
 (defrecord ForkEffect [tag prev-effect data target-effect]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -142,9 +137,9 @@
    (->ForkEffect :fork prev-effect {:effect target-effect} target-effect)))
 
 (defrecord JoinEffect [tag prev-effect data target-fiber timeout-ms timeout-val]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -186,9 +181,9 @@
      (->JoinEffect :join prev-effect {:fiber target-or-opts} target-or-opts nil nil))))
 
 (defrecord InterruptEffect [tag prev-effect data target-fiber reason]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -224,9 +219,9 @@
    (->InterruptEffect :interrupt prev-effect {:fiber target-fiber :reason reason} target-fiber reason)))
 
 (defrecord FiberStatusEffect [tag prev-effect data target-fiber]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -307,9 +302,9 @@
          (fx/run-sync! (first eff-list) context)))))
 
 (defrecord RaceEffect [tag prev-effect data effects]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -330,7 +325,7 @@
   ([prev-effect effects]
    (->RaceEffect :race prev-effect {:effects (vec effects)} (vec effects))))
 
-(defn- run-all-par [effects opts context]
+(defn- run-all-par [effects _opts context]
   (let [eff-list (vec (remove nil? effects))]
     (cond
       (empty? eff-list)
@@ -339,8 +334,8 @@
       :else
       #?(:clj
          (let [n (count eff-list)
-               concurrency   (get opts :concurrency nil)
-               fail-fast?    (get opts :fail-fast? true)
+               concurrency   (get _opts :concurrency nil)
+               fail-fast?    (get _opts :fail-fast? true)
                result-array  (AtomicReferenceArray. n)
                active-fibers (atom #{})
                has-failed?   (atom false)
@@ -400,9 +395,9 @@
          (mapv #(fx/run-sync! % context) eff-list)))))
 
 (defrecord AllParEffect [tag prev-effect data effects opts]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -448,9 +443,9 @@
    (->AllParEffect :all-par prev-effect {:effects (vec effects) :opts opts} (vec effects) (or opts {}))))
 
 (defrecord MapParEffect [tag prev-effect data f coll opts]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)
@@ -517,9 +512,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defrecord WithEngineEffect [tag prev-effect data target-effect engine executor]
-  fx.core.ITagged
+  fx/ITagged
   (tag [_] tag)
-  fx.core.IEffect
+  fx/IEffect
   (prev-effect [_] prev-effect)
   (-step [this val context stack]
     (if (some? prev-effect)

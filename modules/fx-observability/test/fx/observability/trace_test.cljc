@@ -124,12 +124,12 @@
   (testing "handles spans across asynchronous boundaries"
     (let [spans (atom [])
           reporter (fn [s] (swap! spans conj s))
-          fut (-> (trace/with-span-reporter> reporter
-                    (trace/with-span> "async-root"
-                      (-> (fx/succeed> 5)
-                          (fx/map> inc))))
-                  (fx/run-async!))
-          res #?(:clj @fut :cljs nil)]
+          _fut (-> (trace/with-span-reporter> reporter
+                     (trace/with-span> "async-root"
+                       (-> (fx/succeed> 5)
+                           (fx/map> inc))))
+                   (fx/run-async!))
+          res #?(:clj @_fut :cljs nil)]
       (is (= 6 res))
       (is (= 1 (count @spans)))
       (is (= "async-root" (:name (first @spans)))))))

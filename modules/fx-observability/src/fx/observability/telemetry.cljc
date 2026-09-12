@@ -59,7 +59,7 @@
       [nil val current-context stack]))
 
   fx/IUnwindable
-  (-unwind [_ exception rest-stack]
+  (-unwind [_ exception _rest-stack]
     (let [end-nano (current-nano-time)
           duration-ms (/ (double (- end-nano start-nano)) 1000000.0)
           event {:event       event-type

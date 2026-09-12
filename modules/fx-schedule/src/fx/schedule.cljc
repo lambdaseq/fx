@@ -1,6 +1,5 @@
 (ns fx.schedule
   "Composable, pure schedules, recurrence policies, retries, and resilience primitives for fx."
-  (:refer-clojure :exclude [identity])
   (:require [fx.core :as fx]))
 
 ;; ---------------------------------------------------------------------------
@@ -409,9 +408,10 @@
       (let [now      (current-time-ms)
             step-res (-step schedule sched-state now res)]
         (if (= (:decision step-res) :recur)
-          (let [d (long (get step-res :delay-ms 0))]
-            #?(:clj (when (pos? d) (Thread/sleep d)) :cljs nil)
-            [target nil context (conj stack (->RetryScheduleFrame target schedule (:state step-res)))])
+          (do
+            #?(:clj (let [d (long (get step-res :delay-ms 0))]
+                      (when (pos? d) (Thread/sleep d))))
+            [target nil context (conj stack (RetryScheduleFrame. target schedule (:state step-res)))])
           [nil res context stack]))
       [nil res context stack])))
 
@@ -423,9 +423,10 @@
       (let [now      (current-time-ms)
             step-res (-step schedule sched-state now res)]
         (if (= (:decision step-res) :recur)
-          (let [d (long (get step-res :delay-ms 0))]
-            #?(:clj (when (pos? d) (Thread/sleep d)) :cljs nil)
-            [target nil context (conj stack (->RepeatScheduleFrame target schedule (:state step-res) res))])
+          (do
+            #?(:clj (let [d (long (get step-res :delay-ms 0))]
+                      (when (pos? d) (Thread/sleep d))))
+            [target nil context (conj stack (RepeatScheduleFrame. target schedule (:state step-res) res))])
           [nil res context stack])))))
 
 (defrecord ScheduleUnifiedFrame [target schedule sched-state]
@@ -434,9 +435,10 @@
     (let [now      (current-time-ms)
           step-res (-step schedule sched-state now res)]
       (if (= (:decision step-res) :recur)
-        (let [d (long (get step-res :delay-ms 0))]
-          #?(:clj (when (pos? d) (Thread/sleep d)) :cljs nil)
-          [target nil context (conj stack (->ScheduleUnifiedFrame target schedule (:state step-res)))])
+        (do
+          #?(:clj (let [d (long (get step-res :delay-ms 0))]
+                    (when (pos? d) (Thread/sleep d))))
+          [target nil context (conj stack (ScheduleUnifiedFrame. target schedule (:state step-res)))])
         [nil res context stack]))))
 
 ;; ---------------------------------------------------------------------------
@@ -594,32 +596,32 @@
     (if (fx/failure? res)
       (do
         (when (trip-on? res)
-          (let [now (current-time-ms)]
-            (let [[old-s new-s]
-                  (loop []
-                    (let [curr @breaker-atom
-                          old-st (:state curr)]
-                      (case old-st
-                        :half-open
-                        (let [next-state (assoc curr :state :open :tripped-at now :failure-count (inc (:failure-count curr)))]
-                          (if (compare-and-set! breaker-atom curr next-state)
-                            [old-st :open]
-                            (recur)))
+          (let [now (current-time-ms)
+                [old-s new-s]
+                (loop []
+                  (let [curr @breaker-atom
+                        old-st (:state curr)]
+                    (case old-st
+                      :half-open
+                      (let [next-state (assoc curr :state :open :tripped-at now :failure-count (inc (:failure-count curr)))]
+                        (if (compare-and-set! breaker-atom curr next-state)
+                          [old-st :open]
+                          (recur)))
 
-                        :closed
-                        (let [new-count (inc (:failure-count curr))
-                              threshold (:failure-threshold curr)
-                              tripped?  (>= new-count threshold)
-                              next-st   (if tripped? :open :closed)
-                              next-state (assoc curr :state next-st
-                                                :failure-count (if tripped? new-count new-count)
-                                                :tripped-at (when tripped? now))]
-                          (if (compare-and-set! breaker-atom curr next-state)
-                            [old-st next-st]
-                            (recur)))
+                      :closed
+                      (let [new-count (inc (:failure-count curr))
+                            threshold (:failure-threshold curr)
+                            tripped?  (>= new-count threshold)
+                            next-st   (if tripped? :open :closed)
+                            next-state (assoc curr :state next-st
+                                              :failure-count (if tripped? new-count new-count)
+                                              :tripped-at (when tripped? now))]
+                        (if (compare-and-set! breaker-atom curr next-state)
+                          [old-st next-st]
+                          (recur)))
 
-                        [old-st old-st])))]
-              (notify-state-change! on-state-change old-s new-s context))))
+                      [old-st old-st])))]
+            (notify-state-change! on-state-change old-s new-s context)))
         [nil res context stack])
       (do
         (let [[old-s new-s]

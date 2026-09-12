@@ -226,9 +226,9 @@
              (< attempt (get policy :max-attempts 3))
              ((get policy :retry-if (constantly true)) res))
       (do
-        #?(:clj (when (pos? delay-ms) (Thread/sleep delay-ms)) :cljs nil)
+        #?(:clj (when (pos? delay-ms) (Thread/sleep delay-ms)))
         (let [next-delay (long (* delay-ms (get policy :backoff-factor 1.0)))]
-          [target nil context (conj stack (->RetryFrame target value policy (inc attempt) next-delay))]))
+          [target nil context (conj stack (RetryFrame. target value policy (inc attempt) next-delay))]))
       [nil res context stack])))
 
 (defrecord AllFrame [remaining results]
@@ -240,7 +240,7 @@
         (if (empty? remaining)
           [nil new-results context stack]
           (let [[next-eff & rest-effs] remaining]
-            [next-eff nil context (conj stack (->AllFrame rest-effs new-results))]))))))
+            [next-eff nil context (conj stack (AllFrame. rest-effs new-results))]))))))
 
 (defrecord ForEachFrame [f remaining results]
   IContinuation
@@ -253,7 +253,7 @@
           (let [[next-item & rest-items] remaining
                 next-eff (f next-item)]
             (if (effect? next-eff)
-              [next-eff nil context (conj stack (->ForEachFrame f rest-items new-results))]
+              [next-eff nil context (conj stack (ForEachFrame. f rest-items new-results))]
               (if (failure? next-eff)
                 [nil next-eff context stack]
                 [nil (conj new-results next-eff) context stack]))))))))
@@ -304,7 +304,7 @@
                 t-eff (if (nil? (:prev-effect next-test))
                         (chain> (succeed> value) next-test)
                         next-test)]
-            [t-eff nil context (conj stack (->CondFrame value next-expr rest-conds))]))))))
+            [t-eff nil context (conj stack (CondFrame. value next-expr rest-conds))]))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Concrete Effect Records with Polymorphic -step Dispatch
@@ -795,8 +795,7 @@
       (if (failure? val)
         [nil val context stack]
         (do
-          #?(:clj  (when (pos? ms) (Thread/sleep ms))
-             :cljs nil)
+          #?(:clj (when (pos? ms) (Thread/sleep ms)))
           [nil val context stack])))))
 
 ;; ---------------------------------------------------------------------------
