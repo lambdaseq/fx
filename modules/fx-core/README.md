@@ -9,9 +9,9 @@ Declarative, stack-safe, and purely functional effect system for Clojure and Clo
 Add the dependency to your `deps.edn`:
 
 ```clojure
-{:deps {io.github.conjurernix/fx.core {:mvn/version "0.0.1-alpha"}}}
+{:deps {io.github.conjurernix/fx.core {:mvn/version "0.1.0"}}}
 ;; or local module coordinate
-{:deps {fx/core {:mvn/version "0.0.1-alpha"}}}
+{:deps {fx/core {:mvn/version "0.1.0"}}}
 ```
 
 ---
@@ -71,7 +71,7 @@ Add the dependency to your `deps.edn`:
 | `fail>` | `([failure] [tag data])` | Creates a failed effect holding a typed `Failure`. |
 | `map>` | `([f] [eff f])` | Transforms successful values with unary function `f`. |
 | `map-ctx>` | `([f] [eff f])` | Transforms successful values with binary function `(f val context)`. |
-| `mapcat>` | `([f] [eff f])` | Flat-maps over an effect with an effect-producing function `(f val) -> Effect`. |
+| `mapcat>` | `([f] [eff f])` | Flat-maps over an effect with a required effect-producing function `(f val) -> Effect`. |
 | `tap>` | `([f] [eff f])` | Executes side-effect `f` on success and passes the value through unchanged. |
 | `tap-error>` | `([f] [eff f])` | Executes side-effect `f` on failure and passes the failure through unchanged. |
 | `do-ctx>` | `([f] [eff f])` | Executes side-effect `(f val context)` and passes value unchanged. |

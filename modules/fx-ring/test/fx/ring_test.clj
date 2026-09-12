@@ -131,9 +131,6 @@
       (is (= {:message "Unauthorized"} (:body @result-atom))))))
 
 (deftest test-wrap-fx-failures
-  (testing "wrap-fx-failure is identical to wrap-fx-failures"
-    (is (identical? fx-ring/wrap-fx-failures fx-ring/wrap-fx-failure)))
-
   (testing "hybrid failure resolution with explicit failure-map tag match"
     (let [handler (fn [_req] (fx/fail> :not-found {:id 42}))
           opts {:failure-map {:not-found (fn [err req]

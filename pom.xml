@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>fx</groupId>
+  <groupId>io.github.conjurernix</groupId>
   <artifactId>fx</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
-  <name>fx/fx</name>
-  <description>FIXME: my new library.</description>
-  <url>https://github.com/fx/fx</url>
+  <version>0.1.0</version>
+  <name>fx</name>
+  <description>Declarative, purely functional effect system for Clojure and ClojureScript.</description>
+  <url>https://github.com/lambdaseq/fx</url>
   <licenses>
     <license>
-      <name>Eclipse Public License</name>
-      <url>http://www.eclipse.org/legal/epl-v10.html</url>
+      <name>Eclipse Public License 1.0</name>
+      <url>https://opensource.org/license/epl-1-0</url>
     </license>
   </licenses>
   <developers>
@@ -19,10 +19,10 @@
     </developer>
   </developers>
   <scm>
-    <url>https://github.com/fx/fx</url>
-    <connection>scm:git:git://github.com/fx/fx.git</connection>
-    <developerConnection>scm:git:ssh://git@github.com/fx/fx.git</developerConnection>
-    <tag>v0.1.0-SNAPSHOT</tag>
+    <url>https://github.com/lambdaseq/fx</url>
+    <connection>scm:git:git://github.com/lambdaseq/fx.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/lambdaseq/fx.git</developerConnection>
+    <tag>v0.1.0</tag>
   </scm>
   <dependencies>
     <dependency>

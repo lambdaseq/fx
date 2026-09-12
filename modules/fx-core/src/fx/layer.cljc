@@ -282,11 +282,6 @@
        (-pr-writer [_ writer _opts]
          (-write writer (str "#fx.layer/System" (into {} context))))]))
 
-(defn ->LayerSystem
-  "Constructs a `LayerSystem` instance."
-  [context scope]
-  (LayerSystem. context scope))
-
 (defn start-layer!
   "Starts a layer synchronously, returning an active `LayerSystem` record containing
    the initialized `:context` and implementing `java.io.Closeable`."

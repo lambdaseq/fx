@@ -1,4 +1,4 @@
-# fx
+# fx 0.1.0
 
 A lightweight, purely functional, and modular effect system for Clojure and ClojureScript inspired by Effect-ts and ZIO.
 
@@ -245,25 +245,28 @@ Add the necessary modules to your `deps.edn`:
 ```clojure
 {:deps
  {;; Foundational effect system
-  io.github.conjurernix/fx.core          {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.core          {:mvn/version "0.1.0"}
 
   ;; Structured concurrency, fibers, and core.async integration
-  io.github.conjurernix/fx.async         {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.async         {:mvn/version "0.1.0"}
 
   ;; Composable schedules & resilience (retries, rate limiting, circuit breaker)
-  io.github.conjurernix/fx.schedule      {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.schedule      {:mvn/version "0.1.0"}
 
   ;; Zero-dependency observability (logging, tracing, metrics, diagnostics)
-  io.github.conjurernix/fx.observability {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.observability {:mvn/version "0.1.0"}
 
   ;; Optional Typed Clojure support
-  io.github.conjurernix/fx.typed         {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.typed         {:mvn/version "0.1.0"}
 
   ;; Optional JDBC database support
-  io.github.conjurernix/fx.jdbc          {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.jdbc          {:mvn/version "0.1.0"}
 
   ;; Optional Ring HTTP support
-  io.github.conjurernix/fx.ring          {:mvn/version "0.0.1-alpha"}}}
+  io.github.conjurernix/fx.ring          {:mvn/version "0.1.0"}
+
+  ;; Optional declarative HTTP client
+  io.github.conjurernix/fx.http-client   {:mvn/version "0.1.0"}}}
 ```
 
 ---
@@ -282,8 +285,17 @@ clojure -T:build jar
 # Install all modules to local Maven cache (~/.m2)
 clojure -T:build install
 
-# Run full CI pipeline (clean, build JARs, run tests)
-clojure -T:build ci
+# Run full CI pipeline (clean, verify, build JARs, run tests)
+clojure -T:build ci :version '"0.1.0"'
+
+# Check the supported API, versions, and documentation references
+clojure -T:build release-check
+
+# Compile supported ClojureScript namespaces
+clojure -T:build cljs-smoke
+
+# Run the Todo example application tests
+clojure -T:build example-test
 ```
 
 ---

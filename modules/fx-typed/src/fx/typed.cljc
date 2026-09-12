@@ -218,16 +218,18 @@
                  -> (fx/IEffect t/Any out (t/U prev-failure body-failure handler-failure) context)])))
 
 (t/ann fx/mapcat>
-       (t/All [in out
-               [prev-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
-               [inner-failure :< (t/Option (fx/IFailure t/Keyword t/Any))]
-               [context :< Context]]
+       (t/All [in out]
               (t/IFn
-                [(fx/IEffect in out inner-failure context)
-                 -> (fx/IEffect in out inner-failure context)]
-                [(fx/IEffect t/Any in prev-failure context)
-                 (fx/IEffect in out inner-failure context)
-                 -> (fx/IEffect t/Any out (t/U prev-failure inner-failure) context)])))
+                [[in -> (fx/IEffect t/Any out nil Context)]
+                 -> (fx/IEffect in out nil Context)]
+                [[in -> (fx/IEffect t/Any out (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                 -> (fx/IEffect in out (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                [(fx/IEffect t/Any in nil Context)
+                 [in -> (fx/IEffect t/Any out nil Context)]
+                 -> (fx/IEffect t/Any out nil Context)]
+                [(fx/IEffect t/Any in (t/Option (fx/IFailure t/Keyword t/Any)) Context)
+                 [in -> (fx/IEffect t/Any out (t/Option (fx/IFailure t/Keyword t/Any)) Context)]
+                 -> (fx/IEffect t/Any out (t/Option (fx/IFailure t/Keyword t/Any)) Context)])))
 
 (t/ann fx/if>
        (t/All [in then-out else-out

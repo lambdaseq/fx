@@ -9,9 +9,9 @@ Effectful, purely functional JDBC database access for the `fx` effect system, bu
 Add the dependency to your `deps.edn`:
 
 ```clojure
-{:deps {io.github.conjurernix/fx.jdbc {:mvn/version "0.0.1-alpha"}}}
+{:deps {io.github.conjurernix/fx.jdbc {:mvn/version "0.1.0"}}}
 ;; or local module coordinate
-{:deps {fx/jdbc {:mvn/version "0.0.1-alpha"}}}
+{:deps {fx/jdbc {:mvn/version "0.1.0"}}}
 ```
 
 Requires `fx/core` (`io.github.conjurernix/fx.core`).

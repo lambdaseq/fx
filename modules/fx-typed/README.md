@@ -9,9 +9,9 @@ Typed Clojure annotations and static type-checking integration for the `fx` effe
 Add the dependency to your `deps.edn`:
 
 ```clojure
-{:deps {io.github.conjurernix/fx.typed {:mvn/version "0.0.1-alpha"}}}
+{:deps {io.github.conjurernix/fx.typed {:mvn/version "0.1.0"}}}
 ;; or local module coordinate
-{:deps {fx/typed {:mvn/version "0.0.1-alpha"}}}
+{:deps {fx/typed {:mvn/version "0.1.0"}}}
 ```
 
 Requires `fx/core` and Typed Clojure (`org.typedclojure/typed.clj.checker`).

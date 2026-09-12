@@ -9,9 +9,9 @@ Declarative, purely functional HTTP client effects for the `fx` effect system, b
 Add the dependency to your `deps.edn`:
 
 ```clojure
-{:deps {io.github.conjurernix/fx.http-client {:mvn/version "0.0.1-alpha"}}}
+{:deps {io.github.conjurernix/fx.http-client {:mvn/version "0.1.0"}}}
 ;; or local module coordinate
-{:deps {fx/http-client {:mvn/version "0.0.1-alpha"}}}
+{:deps {fx/http-client {:mvn/version "0.1.0"}}}
 ```
 
 Requires `fx/core` (`io.github.conjurernix/fx.core`).

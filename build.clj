@@ -55,9 +55,6 @@
     (println ver)
     ver))
 
-(def current-version version)
-(def show-version version)
-
 (defn- resolve-lib-modules
   [opts]
   (let [mods (or (:modules opts) (:submodules opts) (keys lib-modules))]
@@ -141,10 +138,47 @@
                                "-d" "modules/fx-observability/test"
                                "-d" "modules/fx-schedule/test"
                                "-d" "modules/fx-http-client/test"
-                               "-d" "modules/fx-async/test"]})
+                               "-d" "modules/fx-async/test"
+                               "-d" "release/test"]})
         {:keys [exit]} (b/process cmds)]
     (when-not (zero? exit)
       (throw (ex-info "Tests failed" {:exit exit}))))
+  opts)
+
+(defn example-test
+  "Runs the Todo example application test suite."
+  [opts]
+  (println "\n=== Running Todo example tests ===")
+  (let [{:keys [exit]} (b/process {:command-args ["clojure" "-T:build" "test"]
+                                   :dir "example"})]
+    (when-not (zero? exit)
+      (throw (ex-info "Example tests failed" {:exit exit}))))
+  opts)
+
+(defn release-check
+  "Validates supported namespaces, versions, and documentation references."
+  [opts]
+  (println "\n=== Checking release contract ===")
+  (let [basis (b/create-basis {:aliases [:dev :test :release]})
+        cmds  (b/java-command {:basis basis
+                               :main 'clojure.main
+                               :main-args ["-m" "release-check"]})
+        {:keys [exit]} (b/process cmds)]
+    (when-not (zero? exit)
+      (throw (ex-info "Release contract check failed" {:exit exit}))))
+  opts)
+
+(defn cljs-smoke
+  "Compiles the supported ClojureScript namespaces as a smoke check."
+  [opts]
+  (println "\n=== Running ClojureScript smoke check ===")
+  (let [basis (b/create-basis {:aliases [:dev :release]})
+        cmds  (b/java-command {:basis basis
+                               :main 'clojure.main
+                               :main-args ["-m" "cljs-smoke"]})
+        {:keys [exit]} (b/process cmds)]
+    (when-not (zero? exit)
+      (throw (ex-info "ClojureScript smoke check failed" {:exit exit}))))
   opts)
 
 (defn jar
@@ -210,11 +244,14 @@
     opts))
 
 (defn ci
-  "Runs the CI pipeline: clean, builds JARs, and runs tests for all modules."
+  "Runs the CI pipeline: clean, verifies, builds JARs, and runs tests."
   [opts]
   (clean opts)
-  (jar opts)
+  (release-check opts)
+  (cljs-smoke opts)
   (test opts)
+  (example-test opts)
+  (jar opts)
   opts)
 
 ;; ----------------------------------------------------------------------------
@@ -390,17 +427,15 @@
      :args    - custom vector of CLI arguments to pass to clj-kondo"
   [opts]
   (let [modules (resolve-tool-modules opts)]
-    (run-in-submodules
+        (run-in-submodules
      {:modules modules
       :tool-name "clj-kondo"
       :command-args-fn
       (fn [mod]
         (if-let [args (:args opts)]
-          (into ["clojure" "-M:clj-kondo"] args)
+          (into ["clj-kondo"] args)
           (let [existing-dirs (filter #(-> (io/file mod %) .exists) ["src" "test"])]
-            (into ["clojure" "-M:clj-kondo" "--lint"] (if (seq existing-dirs) existing-dirs ["."])))))})))
-
-(def clj-kondo kondo)
+            (into ["clj-kondo" "--lint"] (if (seq existing-dirs) existing-dirs ["."])))))})))
 
 (defn fmt
   "Runs cljfmt in submodules.
@@ -422,10 +457,8 @@
       :command-args-fn
       (fn [_mod]
         (if-let [args (:args opts)]
-          (into ["clojure" "-M:cljfmt"] args)
-          ["clojure" "-M:cljfmt" mode]))})))
-
-(def cljfmt fmt)
+          (into ["cljfmt"] args)
+          ["cljfmt" mode]))})))
 
 (defn watson
   "Runs clj-watson vulnerability scan in submodules.
@@ -439,10 +472,8 @@
       :tool-name "clj-watson"
       :command-args-fn
       (fn [_mod]
-        (into ["clojure" "-M:clj-watson"]
+        (into ["clj-watson"]
               (or (:args opts) ["scan" "-p" "deps.edn"])))})))
-
-(def clj-watson watson)
 
 (defn all
   "Runs kondo, fmt, and watson in submodules."
@@ -450,6 +481,3 @@
   {:kondo  (kondo opts)
    :fmt    (fmt opts)
    :watson (watson opts)})
-
-(def check all)
-(def lint all)

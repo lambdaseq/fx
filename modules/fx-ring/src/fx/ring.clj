@@ -113,10 +113,6 @@
         (catch Throwable t
           (raise t)))))))
 
-(def wrap-fx-failure
-  "Alias for `wrap-fx-failures`."
-  wrap-fx-failures)
-
 (defn wrap-fx-runner
   "Evaluates effect handler functions (fn [req] -> effect) into Ring values (maps or IFailure).
    Supports 1-arity synchronous (fn [req]) and 3-arity asynchronous (fn [req respond raise]).

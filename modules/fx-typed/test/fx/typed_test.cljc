@@ -292,17 +292,17 @@
 (deftest mapcat>-ann--test
   (testing "mapcat> returns an effect with output type inferred"
     (is-tc-e (-> (fx/succeed> 10)
-                 (fx/mapcat> (fx/map> inc)))
+                 (fx/mapcat> (fn [value] (fx/succeed> (inc value)))))
              (fx/IEffect t/Any Long nil '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])
     (is-tc-e (-> (fx/succeed> "10")
-                 (fx/mapcat> (fx/map> parse-long)))
+                 (fx/mapcat> (fn [value] (fx/succeed> (parse-long value)))))
              (fx/IEffect t/Any (t/Option Long) nil '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])
     (is-tc-err (-> (fx/succeed> "10")
-                   (fx/mapcat> (fx/map> inc)))
+                   (fx/mapcat> (fn [value] (fx/succeed> (inc value)))))
                :requires [[fx.core :as fx]
                           [fx.typed]])))
 

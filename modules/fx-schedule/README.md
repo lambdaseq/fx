@@ -9,9 +9,9 @@ Purely functional, composable schedule and resilience algebra for the `fx` effec
 Add the dependency to your `deps.edn`:
 
 ```clojure
-{:deps {io.github.conjurernix/fx.schedule {:mvn/version "0.0.1-alpha9"}}}
+{:deps {io.github.conjurernix/fx.schedule {:mvn/version "0.1.0"}}}
 ;; or local module coordinate
-{:deps {fx/schedule {:mvn/version "0.0.1-alpha9"}}}
+{:deps {fx/schedule {:mvn/version "0.1.0"}}}
 ```
 
 ---

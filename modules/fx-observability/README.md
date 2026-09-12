@@ -10,9 +10,9 @@ tracing, high-concurrency in-memory metrics, typed failure diagnostics, and tele
 Add the dependency to your `deps.edn`:
 
 ```clojure
-{:deps {io.github.conjurernix/fx.observability {:mvn/version "0.0.1-alpha6"}}}
+{:deps {io.github.conjurernix/fx.observability {:mvn/version "0.1.0"}}}
 ;; or local module coordinate
-{:deps {fx/observability {:mvn/version "0.0.1-alpha6"}}}
+{:deps {fx/observability {:mvn/version "0.1.0"}}}
 ```
 
 ---

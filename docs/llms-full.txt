@@ -159,7 +159,7 @@ When generating `fx` code, strictly follow these repository directives:
 
 1. **Strict Canonical Naming (No Aliases):**
    - Every effect combinator, constructor, and runner has exactly one canonical name.
-   - Do NOT define or use aliases (e.g., use `match>` instead of `fold>`, `acquire-release>` instead of `bracket>`, `succeed>` instead of `succeed`).
+   - Do NOT define or use aliases. Use `match>`, `acquire-release>`, and `succeed>` as the canonical names.
 2. **Standardized Suffix Conventions:**
    - Effect constructors, combinators, and transforms MUST end with `>` (e.g., `succeed>`, `fail>`, `map>`, `match>`, `with-connection>`).
    - Execution runners that evaluate side-effects MUST end with `!` (e.g., `run-sync!`, `run-async!`, `execute!>`).

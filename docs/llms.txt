@@ -26,28 +26,28 @@ Add the desired modules to your `deps.edn`:
 ```clojure
 {:deps
  {;; Foundational effect runtime, DI, layers, and metaprogramming
-  io.github.conjurernix/fx.core          {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.core          {:mvn/version "0.1.0"}
 
   ;; Structured concurrency, fibers, parallel combinators, and CSP channels
-  io.github.conjurernix/fx.async         {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.async         {:mvn/version "0.1.0"}
 
   ;; Composable schedules, retry strategies, circuit breakers, rate limiters
-  io.github.conjurernix/fx.schedule      {:mvn/version "0.0.1-alpha9"}
+  io.github.conjurernix/fx.schedule      {:mvn/version "0.1.0"}
 
   ;; Zero-dependency logging, distributed tracing, metrics, diagnostics
-  io.github.conjurernix/fx.observability {:mvn/version "0.0.1-alpha6"}
+  io.github.conjurernix/fx.observability {:mvn/version "0.1.0"}
 
   ;; Declarative HTTP client effects on Java 11 / Hato
-  io.github.conjurernix/fx.http-client   {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.http-client   {:mvn/version "0.1.0"}
 
   ;; Functional JDBC database access, connection pooling, and transactions
-  io.github.conjurernix/fx.jdbc          {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.jdbc          {:mvn/version "0.1.0"}
 
   ;; Ring web handler adapters, failure resolution, and response builders
-  io.github.conjurernix/fx.ring          {:mvn/version "0.0.1-alpha"}
+  io.github.conjurernix/fx.ring          {:mvn/version "0.1.0"}
 
   ;; Static type annotations for Typed Clojure
-  io.github.conjurernix/fx.typed         {:mvn/version "0.0.1-alpha"}}}
+  io.github.conjurernix/fx.typed         {:mvn/version "0.1.0"}}}
 ```
 
 ---

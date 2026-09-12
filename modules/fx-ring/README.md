@@ -9,9 +9,9 @@ Ring HTTP middleware and response combinators for the `fx` effect system.
 Add the dependency to your `deps.edn`:
 
 ```clojure
-{:deps {io.github.conjurernix/fx.ring {:mvn/version "0.0.1-alpha"}}}
+{:deps {io.github.conjurernix/fx.ring {:mvn/version "0.1.0"}}}
 ;; or local module coordinate
-{:deps {fx/ring {:mvn/version "0.0.1-alpha"}}}
+{:deps {fx/ring {:mvn/version "0.1.0"}}}
 ```
 
 Requires `fx/core` (`io.github.conjurernix/fx.core`).
@@ -62,7 +62,7 @@ Requires `fx/core` (`io.github.conjurernix/fx.core`).
 |---|---|---|
 | `wrap-fx` | `([handler] [handler opts])` | Adapts an effect handler `(fn [req])` returning an `IEffect` pipeline into a Ring handler supporting 1-arity sync `(fn [req])` and 3-arity async `(fn [req respond raise])` with failure translation. |
 | `wrap-fx-runner` | `([handler] [handler opts])` | Granular middleware evaluating effect handler functions `(fn [req] -> effect)` into Ring response or failure values without failure translation. |
-| `wrap-fx-failures` / `wrap-fx-failure` | `([handler] [handler opts])` | Middleware for standard Ring handlers that catches returned `IFailure` instances and transforms them into HTTP responses. |
+| `wrap-fx-failures` | `([handler] [handler opts])` | Middleware for standard Ring handlers that catches returned `IFailure` instances and transforms them into HTTP responses. |
 | `wrap-fx-context` | `[handler context-or-provider]` | Ring middleware that injects an ambient `fx` context map or dynamic provider function into the request under `:fx/context`. |
 | `wrap-fx-all` | `([handler] [handler opts] [handler context opts])` | Composite Ring middleware layering `wrap-fx-context`, `wrap-fx-failures`, and `wrap-fx-runner` into a single wrapper. |
 | `build-fx-context` | `[req opts]` | Merges `{::fx-ring/request req}` with resolved `:provider`, `:services`, or `:context` from `opts` or request into an effect context map. |

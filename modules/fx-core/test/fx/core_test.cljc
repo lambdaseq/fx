@@ -281,28 +281,37 @@
       (is (= "Should print" res)))))
 
 (deftest mapcat>-test
+  (testing "mapcat> rejects an effect where an effect-producing function is required"
+    (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+                          #"effect-producing function"
+                          (mapcat> (succeed> 10)))))
+
   (testing "mapcat> propagates failure"
     (let [res (-> (fail> :test {})
-                  (mapcat> (succeed> 10))
+                  (mapcat> (fn [_] (succeed> 10)))
                   (run-sync!))]
       (is (failure? res))))
   (testing "mapcat> run function should not evaluate on failure"
     (let [res (-> (fail> :test {})
-                  (mapcat> (->
-                             (succeed> 10)
-                             (tap> (fn [_] (print "Should not print")))))
+                  (mapcat> (fn [_]
+                             (-> (succeed> 10)
+                                 (tap> (fn [_] (print "Should not print"))))))
                   (run-sync!)
                   (with-out-str))]
       (is (not= "Should not print" res))))
   (testing "mapcat> applies function to successful effect's value"
     (let [res (-> (succeed> 1)
-                  (mapcat> (map> inc))
+                  (mapcat> (fn [value]
+                             (-> (succeed> value)
+                                 (map> inc))))
                   (run-sync!))]
       (is (= 2 res))))
   (testing "mapcat> run function should evaluate on success"
     (let [res (-> (succeed> 1)
-                  (mapcat> (-> (map> inc)
-                               (tap> (fn [_] (print "Should print")))))
+                  (mapcat> (fn [value]
+                             (-> (succeed> value)
+                                 (map> inc)
+                                 (tap> (fn [_] (print "Should print"))))))
                   (run-sync!)
                   (with-out-str))]
       (is (= "Should print" res)))))
