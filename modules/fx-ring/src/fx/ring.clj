@@ -135,11 +135,11 @@
             (let [ctx (build-fx-context req opts)
                   ^CompletableFuture cf (fx/run-async! res ctx)]
               (.whenComplete cf
-                (reify BiConsumer
-                  (accept [_ val err]
-                    (if err
-                      (raise err)
-                      (respond val))))))
+                             (reify BiConsumer
+                               (accept [_ val err]
+                                 (if err
+                                   (raise err)
+                                   (respond val))))))
             (respond res)))
         (catch Throwable t
           (raise t)))))))

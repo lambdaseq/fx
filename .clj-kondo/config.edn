@@ -1,0 +1,20 @@
+{:config-in-ns
+ {fx.async
+  {:linters {:unresolved-symbol {:exclude [AtomicReferenceArray]}}}
+  fx.async.coordination
+  {:linters {:unresolved-symbol {:exclude [clojure ConcurrentLinkedQueue Throwable java CompletableFuture Semaphore CountDownLatch TimeUnit]}}}
+  fx.async.fiber
+  {:linters {:unresolved-symbol {:exclude [InterruptedException Throwable]}
+             :unresolved-namespace {:exclude [java.util.UUID]}}}
+  fx.observability.log
+  {:linters {:unresolved-symbol {:exclude [*err*]}}}
+  fx.observability.trace
+  {:linters {:unresolved-symbol {:exclude [format]}}}
+  fx.typed-test
+  {:linters {:unresolved-symbol {:exclude [Boolean Long String fx]}}}
+  fx.async.fiber-test
+  {:linters {:unresolved-symbol {:exclude [promise deliver]}}}
+  fx.async.parallel-test
+  {:linters {:unresolved-symbol {:exclude [promise deliver Thread]}}}
+  fx.observability.metrics-test
+  {:linters {:unresolved-symbol {:exclude [future]}}}}}

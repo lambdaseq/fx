@@ -1,6 +1,7 @@
 (ns fx.core-test
   (:refer-clojure :exclude [tap>])
-  (:require [clojure.test :refer :all]
+  (:require [clojure.string]
+            [clojure.test :refer :all]
             [fx.core :refer :all]))
 
 (deftest make-effect-test
@@ -172,7 +173,7 @@
                   (run-sync!))]
       (is (failure? res))
       (is (= :ensure (:tag res)))
-      (is (instance? #?(:clj Throwable :cljs :default) (error-data res)))))
+      (is (instance? #?(:clj Throwable :cljs js/Error) (error-data res)))))
   (testing "ensure> executes effect finalizer preserving upstream value"
     (let [cleaned (atom false)
           res (-> (succeed> "hello")
@@ -202,14 +203,14 @@
                   (run-sync!))]
       (is (failure? res))
       (is (= :try (:tag res)))
-      (is (instance? #?(:clj Throwable :cljs :default) (error-data res)))))
+      (is (instance? #?(:clj Throwable :cljs js/Error) (error-data res)))))
   (testing "try> captures thrown exceptions with custom keyword type"
     (let [res (-> (succeed> 0)
                   (try> (map> #(/ 10 %)) :div-zero)
                   (run-sync!))]
       (is (failure? res))
       (is (= :div-zero (:tag res)))
-      (is (instance? #?(:clj Throwable :cljs :default) (error-data res)))))
+      (is (instance? #?(:clj Throwable :cljs js/Error) (error-data res)))))
   (testing "try> captures thrown exceptions with custom catch effect returning failure"
     (let [res (-> (succeed> 0)
                   (try> (map> #(/ 10 %)) (map> (fn [e] (make-failure :math-error {:msg #?(:clj (.getMessage e) :cljs (str e))}))))
@@ -366,32 +367,32 @@
 (deftest cond>-test
   (testing "Runs the first effect that satisfies the condition"
     (let [eff (->
-                (succeed> 1)
-                (cond>
-                  (map> odd?) (map> inc)
-                  (map> even?) (map> dec)))]
+               (succeed> 1)
+               (cond>
+                (map> odd?) (map> inc)
+                (map> even?) (map> dec)))]
       (is (= 2 (run-sync! eff))))
     (let [eff (->
-                (succeed> 2)
-                (cond>
-                  (map> odd?) (map> inc)
-                  (map> even?) (map> dec)))]
+               (succeed> 2)
+               (cond>
+                (map> odd?) (map> inc)
+                (map> even?) (map> dec)))]
       (is (= 1 (run-sync! eff))))
     (let [eff (->
-                (succeed> 1)
-                (cond>
+               (succeed> 1)
+               (cond>
                   ; Always false
-                  (map> (comp not any?)) (succeed> 1)
+                (map> (comp not any?)) (succeed> 1)
                   ; Always false
-                  (map> (comp not any?)) (succeed> 2)
-                  (map> any?) (succeed> 3)))]
+                (map> (comp not any?)) (succeed> 2)
+                (map> any?) (succeed> 3)))]
       (is (= 3 (run-sync! eff))))
     (let [eff (->
-                (succeed> 42)
-                (cond>
-                  (map> (comp not any?)) (succeed> 1)
-                  (map> (comp not any?)) (succeed> 2)
-                  (map> (comp not any?)) (succeed> 3)))]
+               (succeed> 42)
+               (cond>
+                (map> (comp not any?)) (succeed> 1)
+                (map> (comp not any?)) (succeed> 2)
+                (map> (comp not any?)) (succeed> 3)))]
       (is (failure? (run-sync! eff))))))
 
 (deftest all>-test
@@ -408,7 +409,6 @@
                   (run-sync!)
                   (with-out-str))]
       (is (= "Should print 1Should print 2" res)))))
-
 
 (deftest catchall>-test
   (testing "catchall> catches all exceptions"
@@ -622,20 +622,20 @@
   (testing "successful acquire, use, and release lifecycle"
     (let [released (atom false)
           res (run-sync!
-                (acquire-release>
-                  (succeed> {:db "conn"})
-                  (fn [conn] (succeed> (str (:db conn) "-data")))
-                  (fn [conn] (succeed> (reset! released true)))))]
+               (acquire-release>
+                (succeed> {:db "conn"})
+                (fn [conn] (succeed> (str (:db conn) "-data")))
+                (fn [conn] (succeed> (reset! released true)))))]
       (is (= "conn-data" res))
       (is (true? @released))))
 
   (testing "release executes even when usage fails with IFailure"
     (let [released (atom false)
           res (run-sync!
-                (acquire-release>
-                  (succeed> {:db "conn"})
-                  (fn [_] (fail> :query-error {:code 500}))
-                  (fn [_] (succeed> (reset! released true)))))]
+               (acquire-release>
+                (succeed> {:db "conn"})
+                (fn [_] (fail> :query-error {:code 500}))
+                (fn [_] (succeed> (reset! released true)))))]
       (is (failure? res))
       (is (= :query-error (:tag res)))
       (is (= {:code 500} (error-data res)))
@@ -644,23 +644,23 @@
   (testing "release executes when usage throws an exception and rethrows exception"
     (let [released (atom false)]
       (is (thrown-with-msg?
-            #?(:clj Exception :cljs :default)
-            #"boom"
-            (run-sync!
-              (acquire-release>
-                (succeed> {:db "conn"})
-                (fn [_] (throw (ex-info "boom" {:error :crash})))
-                (fn [_] (succeed> (reset! released true)))))))
+           #?(:clj Exception :cljs :default)
+           #"boom"
+           (run-sync!
+            (acquire-release>
+             (succeed> {:db "conn"})
+             (fn [_] (throw (ex-info "boom" {:error :crash})))
+             (fn [_] (succeed> (reset! released true)))))))
       (is (true? @released))))
 
   (testing "acquisition failure skips use and release"
     (let [used (atom false)
           released (atom false)
           res (run-sync!
-                (acquire-release>
-                  (fail> :conn-failed {:reason :timeout})
-                  (fn [_] (reset! used true) (succeed> 1))
-                  (fn [_] (reset! released true) (succeed> 2))))]
+               (acquire-release>
+                (fail> :conn-failed {:reason :timeout})
+                (fn [_] (reset! used true) (succeed> 1))
+                (fn [_] (reset! released true) (succeed> 2))))]
       (is (failure? res))
       (is (= :conn-failed (:tag res)))
       (is (false? @used))
@@ -669,9 +669,9 @@
 (deftest die>-and-or-die>-test
   (testing "die> throws unhandled defect ExceptionInfo"
     (is (thrown-with-msg?
-          #?(:clj Exception :cljs :default)
-          #"Effect defect encountered"
-          (run-sync! (die> {:reason :fatal})))))
+         #?(:clj Exception :cljs :default)
+         #"Effect defect encountered"
+         (run-sync! (die> {:reason :fatal})))))
 
   (testing "or-die> passes success value through untouched"
     (let [res (-> (succeed> 42)
@@ -691,11 +691,11 @@
 
   (testing "or-die> with custom message"
     (is (thrown-with-msg?
-          #?(:clj clojure.lang.ExceptionInfo :cljs :default)
-          #"Fatal database glitch"
-          (-> (fail> :db-down {:cluster "east"})
-              (or-die> "Fatal database glitch")
-              (run-sync!))))))
+         #?(:clj clojure.lang.ExceptionInfo :cljs :default)
+         #"Fatal database glitch"
+         (-> (fail> :db-down {:cluster "east"})
+             (or-die> "Fatal database glitch")
+             (run-sync!))))))
 
 (deftest try>-exception-mapping-test
   (testing "try> maps specific exception types using map handler"
@@ -711,16 +711,16 @@
   (testing "match> converges success channel"
     (let [res (-> (succeed> {:name "Alice"})
                   (match>
-                    (fn [err] (str "Error: " (tag err)))
-                    (fn [user] (str "Hello " (:name user))))
+                   (fn [err] (str "Error: " (tag err)))
+                   (fn [user] (str "Hello " (:name user))))
                   (run-sync!))]
       (is (= "Hello Alice" res))))
 
   (testing "match> converges failure channel into success value"
     (let [res (-> (fail> :user-not-found {:id 101})
                   (match>
-                    (fn [err] (str "Recovered from " (tag err)))
-                    (fn [val] (str "Success " val)))
+                   (fn [err] (str "Recovered from " (tag err)))
+                   (fn [val] (str "Success " val)))
                   (run-sync!))]
       (is (= "Recovered from :user-not-found" res)))))
 
@@ -782,10 +782,10 @@
                                  (swap! attempts inc)
                                  (make-failure :fatal-unrecoverable {})))
           res (run-sync!
-                (retry> selective-fail
-                  {:max-attempts 5
-                   :delay-ms 1
-                   :retry-if (fn [err] (not= :fatal-unrecoverable (tag err)))}))]
+               (retry> selective-fail
+                       {:max-attempts 5
+                        :delay-ms 1
+                        :retry-if (fn [err] (not= :fatal-unrecoverable (tag err)))}))]
       (is (failure? res))
       (is (= 1 @attempts)))))
 
@@ -797,12 +797,12 @@
   (testing "for-each> short-circuits on first failure"
     (let [evaluated (atom [])
           res (run-sync!
-                (for-each> [1 2 3 4]
-                  (fn [x]
-                    (swap! evaluated conj x)
-                    (if (= x 2)
-                      (fail> :invalid-item {:item x})
-                      (succeed> (* x 2))))))]
+               (for-each> [1 2 3 4]
+                          (fn [x]
+                            (swap! evaluated conj x)
+                            (if (= x 2)
+                              (fail> :invalid-item {:item x})
+                              (succeed> (* x 2))))))]
       (is (failure? res))
       (is (= :invalid-item (:tag res)))
       (is (= {:item 2} (error-data res)))
@@ -821,25 +821,25 @@
 
   (testing "zip-with> applies binary function over effect results"
     (let [res (run-sync!
-                (zip-with>
-                  (succeed> {:name "Alice"})
-                  (succeed> {:role :admin})
-                  (fn [u r] (merge u r))))]
+               (zip-with>
+                (succeed> {:name "Alice"})
+                (succeed> {:role :admin})
+                (fn [u r] (merge u r))))]
       (is (= {:name "Alice" :role :admin} res))))
 
   (testing "zip> short-circuits on first effect failure"
     (let [called-b (atom false)
           res (run-sync!
-                (zip> (fail> :error-a {:code 1})
-                      (map> (fn [_] (reset! called-b true) 2))))]
+               (zip> (fail> :error-a {:code 1})
+                     (map> (fn [_] (reset! called-b true) 2))))]
       (is (failure? res))
       (is (= :error-a (:tag res)))
       (is (false? @called-b))))
 
   (testing "zip> short-circuits on second effect failure"
     (let [res (run-sync!
-                (zip> (succeed> :ok)
-                      (fail> :error-b {:code 2})))]
+               (zip> (succeed> :ok)
+                     (fail> :error-b {:code 2})))]
       (is (failure? res))
       (is (= :error-b (:tag res)))))
 
@@ -973,17 +973,17 @@
   (testing "Unwindable frames clean up resources during exceptions in inner effect pipelines"
     (let [released (atom false)
           eff (acquire-release>
-                (succeed> :resource)
-                (fn [_] (map> (fn [_] (throw (ex-info "Simulated defect" {:boom true})))))
-                (fn [_] (reset! released true)))]
-      (is (thrown? Exception (run-sync! eff)))
+               (succeed> :resource)
+               (fn [_] (map> (fn [_] (throw (ex-info "Simulated defect" {:boom true})))))
+               (fn [_] (reset! released true)))]
+      (is (thrown? #?(:clj Exception :cljs js/Error) (run-sync! eff)))
       (is (true? @released))))
 
   (testing "Unwindable frames clean up resources during direct exceptions in use function"
     (let [released (atom false)
           eff (acquire-release>
-                (succeed> :resource)
-                (fn [_] (throw (ex-info "Direct defect" {:boom true})))
-                (fn [_] (reset! released true)))]
-      (is (thrown? Exception (run-sync! eff)))
+               (succeed> :resource)
+               (fn [_] (throw (ex-info "Direct defect" {:boom true})))
+               (fn [_] (reset! released true)))]
+      (is (thrown? #?(:clj Exception :cljs js/Error) (run-sync! eff)))
       (is (true? @released)))))

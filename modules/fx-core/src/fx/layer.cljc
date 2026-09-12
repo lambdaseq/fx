@@ -36,9 +36,9 @@
   (let [reversed-fins (reverse finalizers)]
     (reduce (fn [acc fin]
               (fx/ensure> acc
-                (fx/match> (fx/try> fin :layer/finalizer-error)
-                  (fn [_err] (fx/succeed> nil))
-                  (fn [_ok] (fx/succeed> nil)))))
+                          (fx/match> (fx/try> fin :layer/finalizer-error)
+                                     (fn [_err] (fx/succeed> nil))
+                                     (fn [_ok] (fx/succeed> nil)))))
             (fx/succeed> nil)
             reversed-fins)))
 
@@ -97,11 +97,11 @@
   [layer scope]
   (-> (fx/try> (-build-eff layer scope) :layer/build-error)
       (fx/match>
-        (fn [err]
-          (-> (close-scope!> scope)
-              (fx/mapcat> (fn [_] (fx/fail> (:tag err) (:error-data err))))))
-        (fn [ctx]
-          (fx/succeed> ctx)))))
+       (fn [err]
+         (-> (close-scope!> scope)
+             (fx/mapcat> (fn [_] (fx/fail> (:tag err) (:error-data err))))))
+       (fn [ctx]
+         (fx/succeed> ctx)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Layer AST Records
@@ -233,11 +233,11 @@
   ([effect layer]
    (let [scope (make-scope)]
      (fx/acquire-release>
-       (build-layer-safe> layer scope)
-       (fn [layer-ctx]
-         (fx/provide> effect layer-ctx))
-       (fn [_]
-         (close-scope!> scope))))))
+      (build-layer-safe> layer scope)
+      (fn [layer-ctx]
+        (fx/provide> effect layer-ctx))
+      (fn [_]
+        (close-scope!> scope))))))
 
 (defn with-layer>
   "Executes `use-eff-fn` (a function `(fn [context] -> Effect)`) within the context of `layer`,
@@ -245,11 +245,11 @@
   [layer use-eff-fn]
   (let [scope (make-scope)]
     (fx/acquire-release>
-      (build-layer-safe> layer scope)
-      (fn [layer-ctx]
-        (fx/provide> (use-eff-fn layer-ctx) layer-ctx))
-      (fn [_]
-        (close-scope!> scope)))))
+     (build-layer-safe> layer scope)
+     (fn [layer-ctx]
+       (fx/provide> (use-eff-fn layer-ctx) layer-ctx))
+     (fn [_]
+       (close-scope!> scope)))))
 
 ;; ---------------------------------------------------------------------------
 ;; System Record & Runners
@@ -264,14 +264,14 @@
        (deref [_] context)
        java.io.Closeable
        (close [_]
-         (fx/run-sync! (close-scope!> scope)))
+              (fx/run-sync! (close-scope!> scope)))
        java.lang.Object
        (toString [_]
-         (str "#fx.layer/System" (into {} context)))
+                 (str "#fx.layer/System" (into {} context)))
        (equals [_ other]
-         (and (instance? LayerSystem other) (= context (.-context ^LayerSystem other))))
+               (and (instance? LayerSystem other) (= context (.-context ^LayerSystem other))))
        (hashCode [_]
-         (.hashCode context))]
+                 (.hashCode context))]
       :cljs
       [ILookup
        (-lookup [_ k] (get context k))
@@ -280,7 +280,7 @@
        (-deref [_] context)
        IPrintWithWriter
        (-pr-writer [_ writer _opts]
-         (-write writer (str "#fx.layer/System" (into {} context))))]))
+                   (-write writer (str "#fx.layer/System" (into {} context))))]))
 
 (defn start-layer!
   "Starts a layer synchronously, returning an active `LayerSystem` record containing
@@ -329,5 +329,6 @@
                        (catch Throwable _ false)))
               system
               (let [latch (java.util.concurrent.CountDownLatch. 1)]
-                (.await latch))))))
+                (.await latch))))
+          :cljs nil))
      system)))

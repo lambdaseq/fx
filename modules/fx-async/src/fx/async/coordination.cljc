@@ -470,15 +470,15 @@
   #?@(:clj
       [clojure.lang.IDeref
        (deref [this]
-         (p/-deferred-await! this))
+              (p/-deferred-await! this))
 
        clojure.lang.IBlockingDeref
        (deref [this timeout-ms timeout-val]
-         (p/-deferred-await! this timeout-ms timeout-val))
+              (p/-deferred-await! this timeout-ms timeout-val))
 
        clojure.lang.IPending
        (isRealized [this]
-         (p/-deferred-completed? this))]))
+                   (p/-deferred-completed? this))]))
 
 (defn make-deferred
   "Creates a new uncompleted `IDeferred` instance."
@@ -737,9 +737,9 @@
    (with-permit> sem 1 effect))
   ([sem n effect]
    (fx/acquire-release>
-     (semaphore-acquire> sem n)
-     (fn [_] effect)
-     (fn [_] (semaphore-release> sem n)))))
+    (semaphore-acquire> sem n)
+    (fn [_] effect)
+    (fn [_] (semaphore-release> sem n)))))
 
 ;; ---------------------------------------------------------------------------
 ;; 5. Async Countdown Latch Implementation
@@ -879,21 +879,21 @@
   #?@(:clj
       [clojure.lang.IDeref
        (deref [_]
-         @atom-ref)
+              @atom-ref)
 
        clojure.lang.IAtom
        (swap [_ f]
-         (swap! atom-ref f))
+             (swap! atom-ref f))
        (swap [_ f arg]
-         (swap! atom-ref f arg))
+             (swap! atom-ref f arg))
        (swap [_ f arg1 arg2]
-         (swap! atom-ref f arg1 arg2))
+             (swap! atom-ref f arg1 arg2))
        (swap [_ f arg1 arg2 args]
-         (apply swap! atom-ref f arg1 arg2 args))
+             (apply swap! atom-ref f arg1 arg2 args))
        (compareAndSet [_ oldv newv]
-         (compare-and-set! atom-ref oldv newv))
+                      (compare-and-set! atom-ref oldv newv))
        (reset [_ newv]
-         (reset! atom-ref newv))]))
+              (reset! atom-ref newv))]))
 
 (defn make-ref
   "Creates an IRef instance initialized with `initial-val`."

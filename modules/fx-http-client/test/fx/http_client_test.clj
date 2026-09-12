@@ -36,7 +36,7 @@
           query-str  (.getQuery uri)
           query      (parse-query query-str)
           headers    (into {} (for [[k v] (.getRequestHeaders exchange)]
-                               [(str/lower-case k) (first v)]))
+                                [(str/lower-case k) (first v)]))
           body-bytes (.readAllBytes (.getRequestBody exchange))
           body-str   (String. body-bytes StandardCharsets/UTF_8)]
 
@@ -171,9 +171,9 @@
 (defn server-fixture [f]
   (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)]
     (.createContext server "/"
-      (reify HttpHandler
-        (handle [_ exchange]
-          (test-handler exchange))))
+                    (reify HttpHandler
+                      (handle [_ exchange]
+                        (test-handler exchange))))
     (.start server)
     (let [port (.getPort (.getAddress server))]
       (reset! *request-counts* {})
@@ -223,50 +223,50 @@
 (deftest test-http-verbs
   (testing "GET request with query params and headers"
     (let [res (fx/run-sync!
-                (http/get> (str *server-base-url* "/get")
-                           {:query-params {:q "search-term"}
-                            :headers      {"X-Test-Header" "MyValue"}}))]
+               (http/get> (str *server-base-url* "/get")
+                          {:query-params {:q "search-term"}
+                           :headers      {"X-Test-Header" "MyValue"}}))]
       (is (http/ok? res))
       (is (= "got:search-term" (:body res)))
       (is (= "MyValue" (get-in res [:headers "x-custom-header"])))))
 
   (testing "POST request with body"
     (let [res (fx/run-sync!
-                (http/post> (str *server-base-url* "/post")
-                            {:body "{\"hello\": \"world\"}"}))]
+               (http/post> (str *server-base-url* "/post")
+                           {:body "{\"hello\": \"world\"}"}))]
       (is (http/ok? res))
       (is (= "posted:{\"hello\": \"world\"}" (:body res)))
       (is (http/success? res))))
 
   (testing "PUT request"
     (let [res (fx/run-sync!
-                (http/put> (str *server-base-url* "/put")
-                           {:body "new-content"}))]
+               (http/put> (str *server-base-url* "/put")
+                          {:body "new-content"}))]
       (is (http/ok? res))
       (is (= "put:new-content" (:body res)))))
 
   (testing "PATCH request"
     (let [res (fx/run-sync!
-                (http/patch> (str *server-base-url* "/patch")
-                             {:body "patch-diff"}))]
+               (http/patch> (str *server-base-url* "/patch")
+                            {:body "patch-diff"}))]
       (is (http/ok? res))
       (is (= "patched:patch-diff" (:body res)))))
 
   (testing "DELETE request"
     (let [res (fx/run-sync!
-                (http/delete> (str *server-base-url* "/delete")))]
+               (http/delete> (str *server-base-url* "/delete")))]
       (is (http/ok? res))
       (is (= "deleted" (:body res)))))
 
   (testing "HEAD request"
     (let [res (fx/run-sync!
-                (http/head> (str *server-base-url* "/head")))]
+               (http/head> (str *server-base-url* "/head")))]
       (is (http/ok? res))
       (is (= "present" (get-in res [:headers "x-head-check"])))))
 
   (testing "OPTIONS request"
     (let [res (fx/run-sync!
-                (http/options> (str *server-base-url* "/options")))]
+               (http/options> (str *server-base-url* "/options")))]
       (is (http/success? res))
       (is (= 204 (:status res)))
       (is (= "GET, POST, OPTIONS, HEAD" (get-in res [:headers "allow"]))))))
@@ -278,16 +278,16 @@
 (deftest test-request-combinator-piping
   (testing "request> with full request map"
     (let [res (fx/run-sync!
-                (http/request> {:url    (str *server-base-url* "/echo")
-                                :method :post
-                                :body   "pipeline-data"}))]
+               (http/request> {:url    (str *server-base-url* "/echo")
+                               :method :post
+                               :body   "pipeline-data"}))]
       (is (http/ok? res))
       (is (= "echo:pipeline-data" (:body res)))))
 
   (testing "request> threaded from upstream effect"
     (let [res (fx/run-sync!
-                (-> (fx/succeed> {:url (str *server-base-url* "/get") :method :get :query-params {:q "upstream"}})
-                    (http/request>)))]
+               (-> (fx/succeed> {:url (str *server-base-url* "/get") :method :get :query-params {:q "upstream"}})
+                   (http/request>)))]
       (is (http/ok? res))
       (is (= "got:upstream" (:body res))))))
 

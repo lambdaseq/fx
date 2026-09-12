@@ -75,13 +75,13 @@
      (let [cf (CompletableFuture.)
            parent-fiber (:fiber context)]
        (async/put! ch val
-         (fn [accepted?]
-           (.complete cf (boolean accepted?))))
+                   (fn [accepted?]
+                     (.complete cf (boolean accepted?))))
        (when parent-fiber
          (fiber/add-interrupt-handler! parent-fiber
-           (fn [_reason]
-             (when-not (.isDone cf)
-               (.complete cf (fx/make-failure :async/channel-put-interrupted {:channel ch :val val}))))))
+                                       (fn [_reason]
+                                         (when-not (.isDone cf)
+                                           (.complete cf (fx/make-failure :async/channel-put-interrupted {:channel ch :val val}))))))
        (try
          (.get cf)
          (catch Throwable e
@@ -135,13 +135,13 @@
              val))
          (do
            (async/take! ch
-             (fn [val]
-               (.complete cf val)))
+                        (fn [val]
+                          (.complete cf val)))
            (when parent-fiber
              (fiber/add-interrupt-handler! parent-fiber
-               (fn [_reason]
-                 (when-not (.isDone cf)
-                   (.complete cf (fx/make-failure :async/channel-take-interrupted {:channel ch}))))))
+                                           (fn [_reason]
+                                             (when-not (.isDone cf)
+                                               (.complete cf (fx/make-failure :async/channel-take-interrupted {:channel ch}))))))
            (try
              (.get cf)
              (catch Throwable e
@@ -222,7 +222,7 @@
 ;; chan-alts> Effect Combinator
 ;; ---------------------------------------------------------------------------
 
-(defn- exec-chan-alts [ports opts context]
+(defn- exec-chan-alts [ports opts]
   #?(:clj
      (let [priority? (get opts :priority false)
            timeout-ms (get opts :timeout-ms nil)
@@ -248,7 +248,7 @@
       (let [target-ports (or ports val)]
         (if (fx/failure? target-ports)
           [nil target-ports context stack]
-          (let [res (exec-chan-alts target-ports opts context)]
+          (let [res (exec-chan-alts target-ports opts)]
             [nil res context stack]))))))
 
 (defn chan-alts>
@@ -281,18 +281,18 @@
            parent-fiber (:fiber context)]
        (letfn [(step []
                  (async/take! ch
-                   (fn [val]
-                     (if (nil? val)
-                       (.complete cf @results)
-                       (do
-                         (swap! results conj val)
-                         (step))))))]
+                              (fn [val]
+                                (if (nil? val)
+                                  (.complete cf @results)
+                                  (do
+                                    (swap! results conj val)
+                                    (step))))))]
          (step))
        (when parent-fiber
          (fiber/add-interrupt-handler! parent-fiber
-           (fn [_reason]
-             (when-not (.isDone cf)
-               (.complete cf (fx/make-failure :async/channel-drain-interrupted {:channel ch}))))))
+                                       (fn [_reason]
+                                         (when-not (.isDone cf)
+                                           (.complete cf (fx/make-failure :async/channel-drain-interrupted {:channel ch}))))))
        (try
          (.get cf)
          (catch Throwable e

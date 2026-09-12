@@ -139,9 +139,9 @@
     (let [spans (atom [])
           reporter (fn [s] (swap! spans conj s))]
       (-> (fx-layer/provide-layer>
-            (trace/with-span> "layer-span"
-              (fx/succeed> :ok))
-            (trace/span-reporter-layer> reporter))
+           (trace/with-span> "layer-span"
+             (fx/succeed> :ok))
+           (trace/span-reporter-layer> reporter))
           (fx/run-sync!))
       (is (= 1 (count @spans)))
       (is (= "layer-span" (:name (first @spans)))))))

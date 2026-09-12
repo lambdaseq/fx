@@ -60,11 +60,11 @@
   "Creates an effect yielding a configured `java.net.http.HttpClient` instance via Hato."
   [opts]
   (fx/try>
-    (fx/map> (fn [_] (hc/build-http-client opts)))
-    (fn [^Throwable e]
-      (http-failure :http/error
-                    (or (.getMessage e) "Failed to build HttpClient")
-                    nil nil nil e {:opts opts}))))
+   (fx/map> (fn [_] (hc/build-http-client opts)))
+   (fn [^Throwable e]
+     (http-failure :http/error
+                   (or (.getMessage e) "Failed to build HttpClient")
+                   nil nil nil e {:opts opts}))))
 
 (defn with-client>
   "Executes `eff` within an execution context where `:fx.http-client/client` is bound to `client`."
@@ -83,13 +83,13 @@
    (http-failure tag message nil nil nil nil nil))
   ([tag message status headers body cause req]
    (fx/make-failure
-     tag
-     {:status  status
-      :headers (or headers {})
-      :body    body
-      :request req
-      :message message
-      :cause   cause})))
+    tag
+    {:status  status
+     :headers (or headers {})
+     :body    body
+     :request req
+     :message message
+     :cause   cause})))
 
 (defn- exception-causes [^Throwable t]
   (loop [curr t
@@ -285,18 +285,18 @@
      (request> nil nil (merge a b))))
   ([prev-effect client req-map]
    (fx/try>
-     (fx/map-ctx>
-       prev-effect
-       (fn [val ctx]
-         (let [req (cond
-                     (and (map? req-map) (not (fx/effect? req-map))) req-map
-                     (and (map? val) (not (fx/effect? val)))         val
-                     :else (throw (ex-info "request> requires a request map" {:req-map req-map :val val})))
-               c   (resolve-client client val ctx)
-               d-opts (:fx.http-client/default-options ctx)]
-           (execute-request! req (ensure-client c) d-opts))))
-     (fn [^Throwable e]
-       (handle-request-exception e (or (when (and (map? req-map) (not (fx/effect? req-map))) req-map) {}))))))
+    (fx/map-ctx>
+     prev-effect
+     (fn [val ctx]
+       (let [req (cond
+                   (and (map? req-map) (not (fx/effect? req-map))) req-map
+                   (and (map? val) (not (fx/effect? val)))         val
+                   :else (throw (ex-info "request> requires a request map" {:req-map req-map :val val})))
+             c   (resolve-client client val ctx)
+             d-opts (:fx.http-client/default-options ctx)]
+         (execute-request! req (ensure-client c) d-opts))))
+    (fn [^Throwable e]
+      (handle-request-exception e (or (when (and (map? req-map) (not (fx/effect? req-map))) req-map) {}))))))
 
 (defn get>
   "Creates an HTTP GET request effect.

@@ -274,29 +274,29 @@
                (swap! active-fibers conj fib)
                (let [^CompletableFuture cf (p/fiber-result fib)]
                  (.whenComplete cf
-                   (reify java.util.function.BiConsumer
-                     (accept [_ result err]
-                       (if (and (nil? err) (not (fx/failure? result)))
+                                (reify java.util.function.BiConsumer
+                                  (accept [_ result err]
+                                    (if (and (nil? err) (not (fx/failure? result)))
                          ;; Winner found
-                         (when (compare-and-set! completed? false true)
-                           (.complete winner-future result)
+                                      (when (compare-and-set! completed? false true)
+                                        (.complete winner-future result)
                            ;; Cancel losing competitors
-                           (doseq [f @active-fibers]
-                             (when-not (identical? f fib)
-                               (fiber/interrupt-fiber! f :race-lost))))
+                                        (doseq [f @active-fibers]
+                                          (when-not (identical? f fib)
+                                            (fiber/interrupt-fiber! f :race-lost))))
                          ;; Failure encountered
-                         (let [failures (swap! failure-count inc)]
-                           (when (and (= failures total-count)
-                                      (compare-and-set! completed? false true))
+                                      (let [failures (swap! failure-count inc)]
+                                        (when (and (= failures total-count)
+                                                   (compare-and-set! completed? false true))
                              ;; All racers failed; return the failure
-                             (let [final-fail (or result (fx/make-failure :async/all-racers-failed {:err err}))]
-                               (.complete winner-future final-fail)))))))))))
+                                          (let [final-fail (or result (fx/make-failure :async/all-racers-failed {:err err}))]
+                                            (.complete winner-future final-fail)))))))))))
            ;; Clean up racers if parent fiber interrupted
            (when parent-fiber
              (fiber/add-interrupt-handler! parent-fiber
-               (fn [_reason]
-                 (doseq [f @active-fibers]
-                   (fiber/interrupt-fiber! f :parent-interrupted)))))
+                                           (fn [_reason]
+                                             (doseq [f @active-fibers]
+                                               (fiber/interrupt-fiber! f :parent-interrupted)))))
            (try
              (.get winner-future)
              (catch Throwable e
@@ -352,45 +352,45 @@
            ;; Setup cancellation hook from parent
            (when parent-fiber
              (fiber/add-interrupt-handler! parent-fiber
-               (fn [_reason]
-                 (doseq [f @active-fibers]
-                   (fiber/interrupt-fiber! f :parent-interrupted)))))
+                                           (fn [_reason]
+                                             (doseq [f @active-fibers]
+                                               (fiber/interrupt-fiber! f :parent-interrupted)))))
 
            (doseq [idx (range n)]
              (let [eff (nth eff-list idx)
                    task-eff (if sem
                               (fx/acquire-release>
-                                (fx/try> (fn [] (.acquire sem) true))
-                                (fn [_] eff)
-                                (fn [_] (.release sem)))
+                               (fx/try> (fn [] (.acquire sem) true))
+                               (fn [_] eff)
+                               (fn [_] (.release sem)))
                               eff)
                    fib (fiber/run-fiber! task-eff context)]
                (swap! active-fibers conj fib)
                (let [^CompletableFuture cf (p/fiber-result fib)]
                  (.whenComplete cf
-                   (reify java.util.function.BiConsumer
-                     (accept [_ result err]
-                       (swap! active-fibers disj fib)
-                       (cond
-                         err
-                         (let [defect (fx/make-failure :async/defect {:exception err :message (.getMessage err)})]
-                           (.set result-array idx defect)
-                           (when (and fail-fast? (compare-and-set! has-failed? false true))
-                             (reset! failure-ref defect)
-                             (doseq [f @active-fibers]
-                               (fiber/interrupt-fiber! f :sibling-failed))))
+                                (reify java.util.function.BiConsumer
+                                  (accept [_ result err]
+                                    (swap! active-fibers disj fib)
+                                    (cond
+                                      err
+                                      (let [defect (fx/make-failure :async/defect {:exception err :message (.getMessage err)})]
+                                        (.set result-array idx defect)
+                                        (when (and fail-fast? (compare-and-set! has-failed? false true))
+                                          (reset! failure-ref defect)
+                                          (doseq [f @active-fibers]
+                                            (fiber/interrupt-fiber! f :sibling-failed))))
 
-                         (fx/failure? result)
-                         (do
-                           (.set result-array idx result)
-                           (when (and fail-fast? (compare-and-set! has-failed? false true))
-                             (reset! failure-ref result)
-                             (doseq [f @active-fibers]
-                               (fiber/interrupt-fiber! f :sibling-failed))))
+                                      (fx/failure? result)
+                                      (do
+                                        (.set result-array idx result)
+                                        (when (and fail-fast? (compare-and-set! has-failed? false true))
+                                          (reset! failure-ref result)
+                                          (doseq [f @active-fibers]
+                                            (fiber/interrupt-fiber! f :sibling-failed))))
 
-                         :else
-                         (.set result-array idx result))
-                       (.countDown latch)))))))
+                                      :else
+                                      (.set result-array idx result))
+                                    (.countDown latch)))))))
 
            (.await latch)
            (if (and fail-fast? @has-failed?)

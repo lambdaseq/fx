@@ -66,7 +66,7 @@
 
   (testing "unsandbox re-throws Die defect"
     (let [cause (diag/cause-die (ex-info "Fatal" {:fatal true}))]
-      (is (thrown? Exception
+      (is (thrown? #?(:clj Exception :cljs js/Error)
                    (-> (fx/succeed> cause)
                        (diag/unsandbox>)
                        (fx/run-sync!)))))))

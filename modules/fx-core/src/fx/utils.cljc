@@ -228,7 +228,7 @@
                    (contains? data :handlers) (filterv fx/effect? (vals (:handlers data)))
                    :else
                    (filterv fx/effect? (vals (select-keys data [:body :finalizer :acquire :target :inner-effect
-                                                               :cond :then :else :eff-a :eff-b :catch]))))]
+                                                                :cond :then :else :eff-a :eff-b :catch]))))]
       (cond-> []
         (fx/effect? prev) (conj prev)
         (seq nested) (into nested)))))

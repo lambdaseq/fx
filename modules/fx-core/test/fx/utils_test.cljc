@@ -1,5 +1,6 @@
 (ns fx.utils-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string]
+            [clojure.test :refer [deftest is testing]]
             [fx.core :as fx]
             [fx.utils :as fxu]))
 

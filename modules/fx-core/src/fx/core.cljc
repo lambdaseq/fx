@@ -651,7 +651,7 @@
           (if (empty? items)
             [nil [] context stack]
             (let [[item1 & rest-items] items
-                next-eff (f item1)]
+                  next-eff (f item1)]
               (cond
                 (effect? next-eff)
                 [next-eff nil context (conj stack (->ForEachFrame f rest-items []))]
@@ -1337,13 +1337,13 @@
   ([effect context]
    #?(:clj
       (CompletableFuture/supplyAsync
-        (reify Supplier
-          (get [_]
-            (run-sync! effect context))))
+       (reify Supplier
+         (get [_]
+           (run-sync! effect context))))
       :cljs
       (js/Promise.
-        (fn [resolve reject]
-          (try
-            (resolve (run-sync! effect context))
-            (catch :default e
-              (reject e))))))))
+       (fn [resolve reject]
+         (try
+           (resolve (run-sync! effect context))
+           (catch :default e
+             (reject e))))))))

@@ -43,34 +43,34 @@
                         [fx.typed]]))
   (testing "type-checks with a previous effect"
     (is-tc-e (fx/make-effect :foo
-               (fx/make-effect :bar nil {:val 1})
-               {:f inc})
+                             (fx/make-effect :bar nil {:val 1})
+                             {:f inc})
              (fx/IEffect Long Long t/Nothing '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])
     (is-tc-e (fx/make-effect :foo
-               (fx/make-effect :bar nil {:val "10"})
-               {:f parse-long})
+                             (fx/make-effect :bar nil {:val "10"})
+                             {:f parse-long})
              (fx/IEffect String (t/Option Long) t/Nothing '{})
              :requires [[fx.core :as fx]
                         [fx.typed]]))
   (testing "type-checks with a previous effect and a failure"
     (is-tc-e (fx/make-effect :foo
-               (fx/fail> :ok)
-               {:f identity})
+                             (fx/fail> :ok)
+                             {:f identity})
              (fx/IEffect
-               nil nil
-               (fx/IFailure (t/Val :fail) (t/Val :ok))
-               '{})
+              nil nil
+              (fx/IFailure (t/Val :fail) (t/Val :ok))
+              '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])
     (is-tc-e (fx/make-effect :foo
-               (fx/fail> :bar)
-               {:f some?})
+                             (fx/fail> :bar)
+                             {:f some?})
              (fx/IEffect
-               nil Boolean
-               (fx/IFailure (t/Val :fail) (t/Val :bar))
-               '{})
+              nil Boolean
+              (fx/IFailure (t/Val :fail) (t/Val :bar))
+              '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])))
 
@@ -89,16 +89,16 @@
   (testing "fail> returns an effect with failure type and error inferred."
     (is-tc-e (fx/fail> :foo)
              (fx/IEffect
-               t/Any nil
-               (fx/IFailure (t/Val :fail) (t/Val :foo))
-               '{})
+              t/Any nil
+              (fx/IFailure (t/Val :fail) (t/Val :foo))
+              '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])
     (is-tc-e (fx/fail> {})
              (fx/IEffect
-               t/Any nil
-               (fx/IFailure (t/Val :fail) (t/HMap :complete? true))
-               '{})
+              t/Any nil
+              (fx/IFailure (t/Val :fail) (t/HMap :complete? true))
+              '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])))
 
@@ -138,16 +138,16 @@
     (is-tc-e (-> (fx/fail> :foo)
                  (fx/map> inc))
              (fx/IEffect t/Any Long
-               (fx/IFailure (t/Val :fail) (t/Val :foo))
-               '{})
+                         (fx/IFailure (t/Val :fail) (t/Val :foo))
+                         '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])
     (is-tc-e (-> (fx/fail> :foo)
                  (fx/map> inc)
                  (fx/map> str))
              (fx/IEffect t/Any String
-               (fx/IFailure (t/Val :fail) (t/Val :foo))
-               '{})
+                         (fx/IFailure (t/Val :fail) (t/Val :foo))
+                         '{})
              :requires [[fx.core :as fx]
                         [fx.typed]]))
 
@@ -174,16 +174,16 @@
     (is-tc-e (-> (fx/fail> {})
                  (fx/tap> println))
              (fx/IEffect t/Any nil
-               (fx/IFailure (t/Val :fail) (t/Val {}))
-               '{})
+                         (fx/IFailure (t/Val :fail) (t/Val {}))
+                         '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])
     (is-tc-e (-> (fx/fail> {})
                  (fx/map> inc)
                  (fx/tap> println))
              (fx/IEffect t/Any Long
-               (fx/IFailure (t/Val :fail) (t/Val {}))
-               '{})
+                         (fx/IFailure (t/Val :fail) (t/Val {}))
+                         '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])))
 
@@ -203,8 +203,8 @@
     (is-tc-e (-> (fx/fail> {})
                  (fx/tap-error> println))
              (fx/IEffect t/Any nil
-               (fx/IFailure (t/Val :fail) (t/Val {}))
-               '{})
+                         (fx/IFailure (t/Val :fail) (t/Val {}))
+                         '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])))
 
@@ -229,17 +229,17 @@
     (is-tc-e (-> (fx/fail> :upstream)
                  (fx/ensure> (fx/succeed> :cleaned)))
              (fx/IEffect t/Any nil
-               (t/Option (t/U (fx/IFailure (t/Val :fail) (t/Val :upstream))
-                              (fx/IFailure (t/Val :ensure) t/Any)))
-               '{})
+                         (t/Option (t/U (fx/IFailure (t/Val :fail) (t/Val :upstream))
+                                        (fx/IFailure (t/Val :ensure) t/Any)))
+                         '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])
     (is-tc-e (-> (fx/succeed> 10)
                  (fx/ensure> (fx/fail> :cleanup)))
              (fx/IEffect t/Any Long
-               (t/Option (t/U (fx/IFailure (t/Val :fail) (t/Val :cleanup))
-                              (fx/IFailure (t/Val :ensure) t/Any)))
-               '{})
+                         (t/Option (t/U (fx/IFailure (t/Val :fail) (t/Val :cleanup))
+                                        (fx/IFailure (t/Val :ensure) t/Any)))
+                         '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])))
 
@@ -357,15 +357,15 @@
   (testing "cond> returns output type of expressions with possible no-conditions failure"
     (is-tc-e (-> (fx/succeed> 10)
                  (fx/cond>
-                   (fx/map> odd?) (fx/map> inc)
-                   (fx/map> even?) (fx/map> dec)))
+                  (fx/map> odd?) (fx/map> inc)
+                  (fx/map> even?) (fx/map> dec)))
              (fx/IEffect t/Any Long (t/Option (fx/IFailure (t/Val :cond) (t/Val :no-conditions))) '{})
              :requires [[fx.core :as fx]
                         [fx.typed]]))
   (testing "cond> propagates previous failure"
     (is-tc-e (-> (fx/fail> :foo)
                  (fx/cond>
-                   (fx/map> odd?) (fx/map> inc)))
+                  (fx/map> odd?) (fx/map> inc)))
              (fx/IEffect t/Any Long (t/Option (t/U (fx/IFailure (t/Val :fail) (t/Val :foo))
                                                    (fx/IFailure (t/Val :cond) (t/Val :no-conditions)))) '{})
              :requires [[fx.core :as fx]
@@ -512,9 +512,9 @@
 (deftest acquire-release>-ann--test
   (testing "acquire-release> typing succeeds"
     (is-tc-e (fx/acquire-release>
-               (fx/succeed> {:db "conn"})
-               (fn [conn] (fx/succeed> "data"))
-               (fn [conn] (fx/succeed> nil)))
+              (fx/succeed> {:db "conn"})
+              (fn [conn] (fx/succeed> "data"))
+              (fn [conn] (fx/succeed> nil)))
              (fx/IEffect t/Any String nil '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])))
@@ -531,8 +531,8 @@
   (testing "match> converges return types"
     (is-tc-e (-> (fx/succeed> 10)
                  (fx/match>
-                   (fn [_err] "error")
-                   (fn [_val] "success")))
+                  (fn [_err] "error")
+                  (fn [_val] "success")))
              (fx/IEffect t/Any String nil '{})
              :requires [[fx.core :as fx]
                         [fx.typed]])))

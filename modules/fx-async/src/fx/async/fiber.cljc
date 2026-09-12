@@ -68,29 +68,29 @@
   #?@(:clj
       [clojure.lang.IDeref
        (deref [_]
-         (try
-           (.get ^CompletableFuture result-cell)
-           (catch Throwable e
-             (let [cause (or (.getCause e) e)]
-               (if (fx/failure? cause)
-                 cause
-                 (fx/make-failure :fiber/defect cause))))))
+              (try
+                (.get ^CompletableFuture result-cell)
+                (catch Throwable e
+                  (let [cause (or (.getCause e) e)]
+                    (if (fx/failure? cause)
+                      cause
+                      (fx/make-failure :fiber/defect cause))))))
 
        clojure.lang.IBlockingDeref
        (deref [_ timeout-ms timeout-val]
-         (try
-           (.get ^CompletableFuture result-cell (long timeout-ms) TimeUnit/MILLISECONDS)
-           (catch TimeoutException _
-             timeout-val)
-           (catch Throwable e
-             (let [cause (or (.getCause e) e)]
-               (if (fx/failure? cause)
-                 cause
-                 (fx/make-failure :fiber/defect cause))))))
+              (try
+                (.get ^CompletableFuture result-cell (long timeout-ms) TimeUnit/MILLISECONDS)
+                (catch TimeoutException _
+                  timeout-val)
+                (catch Throwable e
+                  (let [cause (or (.getCause e) e)]
+                    (if (fx/failure? cause)
+                      cause
+                      (fx/make-failure :fiber/defect cause))))))
 
        clojure.lang.IPending
        (isRealized [_]
-         (.isDone ^CompletableFuture result-cell))]))
+                   (.isDone ^CompletableFuture result-cell))]))
 
 (defn make-fiber
   "Constructs a new unstarted or initial Fiber instance."
@@ -271,9 +271,9 @@
            (.submit exec ^Runnable (fn [] (execute-fiber-task! fiber effect fiber-ctx)))
            #?(:clj
               (CompletableFuture/supplyAsync
-                (reify Supplier
-                  (get [_]
-                    (execute-fiber-task! fiber effect fiber-ctx))))
+               (reify Supplier
+                 (get [_]
+                   (execute-fiber-task! fiber effect fiber-ctx))))
               :cljs
               (js/setTimeout (fn [] (execute-fiber-task! fiber effect fiber-ctx)) 0)))))
      fiber)))
@@ -289,10 +289,10 @@
      #?(:clj
         (let [^CompletableFuture cf (p/fiber-result fiber)]
           (.whenComplete cf
-            (reify java.util.function.BiConsumer
-              (accept [_ result _err]
-                (async/put! out-chan (or result (fx/make-failure :fiber/nil-result nil))
-                            (fn [_] (async/close! out-chan)))))))
+                         (reify java.util.function.BiConsumer
+                           (accept [_ result _err]
+                             (async/put! out-chan (or result (fx/make-failure :fiber/nil-result nil))
+                                         (fn [_] (async/close! out-chan)))))))
         :cljs
         (async/go
           (let [res (join-fiber! fiber)]

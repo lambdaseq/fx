@@ -330,9 +330,9 @@
   (testing "trips open after exceeding failure threshold"
     (let [state-changes (atom [])
           breaker (sched/make-circuit-breaker {:failure-threshold 2
-                                              :reset-timeout-ms 500
-                                              :on-state-change (fn [from to]
-                                                                 (swap! state-changes conj [from to]))})
+                                               :reset-timeout-ms 500
+                                               :on-state-change (fn [from to]
+                                                                  (swap! state-changes conj [from to]))})
           fail-eff (sched/circuit-breaker> (fx/fail> :downstream-err "err") breaker)]
       ;; Failure 1: count=1, still closed
       (is (fx/failure? (fx/run-sync! fail-eff)))

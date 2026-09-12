@@ -401,16 +401,18 @@
 ;; Linting, Formatting, and Vulnerability Scanning
 ;; ----------------------------------------------------------------------------
 
+(declare fmt)
+
 (defn- resolve-tool-modules [opts]
   (or (:modules opts) (:submodules opts) default-all-modules))
 
 (defn- run-in-submodules
-  [{:keys [modules tool-name command-args-fn]}]
+  [{:keys [modules tool-name command-args-fn dir]}]
   (let [results (reduce (fn [acc mod]
                           (println (str "\n=== Running " tool-name " in " mod " ==="))
                           (let [args (command-args-fn mod)
                                 res  (b/process {:command-args args
-                                                 :dir mod})]
+                                                 :dir (or dir mod)})]
                             (conj acc (assoc res :module mod))))
                         []
                         modules)
@@ -424,18 +426,26 @@
   "Runs clj-kondo in submodules.
    Options:
      :modules - vector of submodules to run against (default: [\"modules/fx-core\" \"modules/fx-typed\" \"modules/fx-jdbc\" \"modules/fx-ring\"])
+     :fix     - runs the configured cljfmt fixer before linting
      :args    - custom vector of CLI arguments to pass to clj-kondo"
   [opts]
-  (let [modules (resolve-tool-modules opts)]
-        (run-in-submodules
-     {:modules modules
-      :tool-name "clj-kondo"
-      :command-args-fn
-      (fn [mod]
-        (if-let [args (:args opts)]
-          (into ["clj-kondo"] args)
-          (let [existing-dirs (filter #(-> (io/file mod %) .exists) ["src" "test"])]
-            (into ["clj-kondo" "--lint"] (if (seq existing-dirs) existing-dirs ["."])))))})))
+  (when (:fix opts)
+    (fmt (assoc opts :mode :fix)))
+  (let [modules (resolve-tool-modules opts)
+        results (run-in-submodules
+                 {:modules modules
+                  :tool-name "clj-kondo"
+                  :command-args-fn
+                  (fn [mod]
+                    (if-let [args (:args opts)]
+                      (into ["clj-kondo"] args)
+                      (let [existing-dirs (filter #(-> (io/file mod %) .exists) ["src" "test"])]
+                        (into ["clj-kondo" "--fail-level" "error" "--lint"]
+                              (if (seq existing-dirs) existing-dirs ["."])))))} )
+        failures (filter #(not (zero? (:exit %))) results)]
+    (when (seq failures)
+      (throw (ex-info "clj-kondo found errors" {:modules (mapv :module failures)})))
+    opts))
 
 (defn fmt
   "Runs cljfmt in submodules.
@@ -454,11 +464,12 @@
     (run-in-submodules
      {:modules modules
       :tool-name "cljfmt"
+      :dir "."
       :command-args-fn
-      (fn [_mod]
+      (fn [mod]
         (if-let [args (:args opts)]
-          (into ["cljfmt"] args)
-          ["cljfmt" mode]))})))
+          (into ["clojure" "-M:cljfmt" "-m" "cljfmt.main"] args)
+          ["clojure" "-M:cljfmt" "-m" "cljfmt.main" mode (str (b/resolve-path mod))]))})))
 
 (defn watson
   "Runs clj-watson vulnerability scan in submodules.

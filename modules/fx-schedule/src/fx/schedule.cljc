@@ -46,29 +46,29 @@
    Outputs the total count of completed recurrences."
   []
   (make-schedule
-    (fn [] 0)
-    (fn [count _now _input]
-      {:decision :recur
-       :delay-ms 0
-       :state    (inc count)
-       :out      count})))
+   (fn [] 0)
+   (fn [count _now _input]
+     {:decision :recur
+      :delay-ms 0
+      :state    (inc count)
+      :out      count})))
 
 (defn recur-n>
   "Creates a schedule that recurs at most `n` times with 0 delay.
    Outputs the total count of completed recurrences."
   [n]
   (make-schedule
-    (fn [] 0)
-    (fn [count _now _input]
-      (if (< count n)
-        {:decision :recur
-         :delay-ms 0
-         :state    (inc count)
-         :out      count}
-        {:decision :halt
-         :delay-ms 0
-         :state    count
-         :out      count}))))
+   (fn [] 0)
+   (fn [count _now _input]
+     (if (< count n)
+       {:decision :recur
+        :delay-ms 0
+        :state    (inc count)
+        :out      count}
+       {:decision :halt
+        :delay-ms 0
+        :state    count
+        :out      count}))))
 
 (defn once>
   "Creates a schedule that recurs exactly once with 0 delay."
@@ -81,12 +81,12 @@
   [delay-ms]
   (let [d (long (max 0 delay-ms))]
     (make-schedule
-      (fn [] 0)
-      (fn [count _now _input]
-        {:decision :recur
-         :delay-ms d
-         :state    (inc count)
-         :out      count}))))
+     (fn [] 0)
+     (fn [count _now _input]
+       {:decision :recur
+        :delay-ms d
+        :state    (inc count)
+        :out      count}))))
 
 (defn linear-backoff>
   "Creates a schedule that increases delay linearly (`(* initial-ms attempt)`).
@@ -99,15 +99,15 @@
    (let [initial-ms (long (get opts :initial-ms 100))
          max-ms     (when-let [m (:max-ms opts)] (long m))]
      (make-schedule
-       (fn [] 0)
-       (fn [count _now _input]
-         (let [multiplier (inc count)
-               computed   (* initial-ms multiplier)
-               delay-ms   (if max-ms (min computed max-ms) computed)]
-           {:decision :recur
-            :delay-ms (long (max 0 delay-ms))
-            :state    (inc count)
-            :out      delay-ms}))))))
+      (fn [] 0)
+      (fn [count _now _input]
+        (let [multiplier (inc count)
+              computed   (* initial-ms multiplier)
+              delay-ms   (if max-ms (min computed max-ms) computed)]
+          {:decision :recur
+           :delay-ms (long (max 0 delay-ms))
+           :state    (inc count)
+           :out      delay-ms}))))))
 
 (defn exponential-backoff>
   "Creates a schedule that increases delay exponentially (`(* initial-ms (Math/pow factor attempt))`).
@@ -122,14 +122,14 @@
          factor     (double (get opts :factor 2.0))
          max-ms     (when-let [m (:max-ms opts)] (long m))]
      (make-schedule
-       (fn [] 0)
-       (fn [count _now _input]
-         (let [computed (long (* initial-ms (Math/pow factor (double count))))
-               delay-ms (if max-ms (min computed max-ms) computed)]
-           {:decision :recur
-            :delay-ms (long (max 0 delay-ms))
-            :state    (inc count)
-            :out      delay-ms}))))))
+      (fn [] 0)
+      (fn [count _now _input]
+        (let [computed (long (* initial-ms (Math/pow factor (double count))))
+              delay-ms (if max-ms (min computed max-ms) computed)]
+          {:decision :recur
+           :delay-ms (long (max 0 delay-ms))
+           :state    (inc count)
+           :out      delay-ms}))))))
 
 (defn fibonacci-backoff>
   "Creates a schedule that increases delay according to the Fibonacci sequence.
@@ -142,14 +142,14 @@
    (let [initial-ms (long (get opts :initial-ms 100))
          max-ms     (when-let [m (:max-ms opts)] (long m))]
      (make-schedule
-       (fn [] [0 1])
-       (fn [[a b] _now _input]
-         (let [computed (long (* initial-ms b))
-               delay-ms (if max-ms (min computed max-ms) computed)]
-           {:decision :recur
-            :delay-ms (long (max 0 delay-ms))
-            :state    [b (+ a b)]
-            :out      delay-ms}))))))
+      (fn [] [0 1])
+      (fn [[a b] _now _input]
+        (let [computed (long (* initial-ms b))
+              delay-ms (if max-ms (min computed max-ms) computed)]
+          {:decision :recur
+           :delay-ms (long (max 0 delay-ms))
+           :state    [b (+ a b)]
+           :out      delay-ms}))))))
 
 (defn elapsed>
   "Creates a schedule that recurs as long as the elapsed time since start is less than `max-duration-ms`.
@@ -157,19 +157,19 @@
   [max-duration-ms]
   (let [max-ms (long max-duration-ms)]
     (make-schedule
-      (fn [] {:start-time nil :elapsed 0})
-      (fn [{:keys [start-time]} now _input]
-        (let [start   (or start-time now)
-              elapsed (- now start)]
-          (if (< elapsed max-ms)
-            {:decision :recur
-             :delay-ms 0
-             :state    {:start-time start :elapsed elapsed}
-             :out      elapsed}
-            {:decision :halt
-             :delay-ms 0
-             :state    {:start-time start :elapsed elapsed}
-             :out      elapsed}))))))
+     (fn [] {:start-time nil :elapsed 0})
+     (fn [{:keys [start-time]} now _input]
+       (let [start   (or start-time now)
+             elapsed (- now start)]
+         (if (< elapsed max-ms)
+           {:decision :recur
+            :delay-ms 0
+            :state    {:start-time start :elapsed elapsed}
+            :out      elapsed}
+           {:decision :halt
+            :delay-ms 0
+            :state    {:start-time start :elapsed elapsed}
+            :out      elapsed}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Schedule Composition Combinators
@@ -181,20 +181,20 @@
    Outputs a pair `[out-a out-b]`."
   [sched-a sched-b]
   (make-schedule
-    (fn [] [(-initial-state sched-a) (-initial-state sched-b)])
-    (fn [[st-a st-b] now input]
-      (let [res-a    (-step sched-a st-a now input)
-            res-b    (-step sched-b st-b now input)
-            decision (if (and (= (:decision res-a) :recur)
-                              (= (:decision res-b) :recur))
-                       :recur
-                       :halt)
-            delay-ms (max (long (:delay-ms res-a))
-                          (long (:delay-ms res-b)))]
-        {:decision decision
-         :delay-ms (long (max 0 delay-ms))
-         :state    [(:state res-a) (:state res-b)]
-         :out      [(:out res-a) (:out res-b)]}))))
+   (fn [] [(-initial-state sched-a) (-initial-state sched-b)])
+   (fn [[st-a st-b] now input]
+     (let [res-a    (-step sched-a st-a now input)
+           res-b    (-step sched-b st-b now input)
+           decision (if (and (= (:decision res-a) :recur)
+                             (= (:decision res-b) :recur))
+                      :recur
+                      :halt)
+           delay-ms (max (long (:delay-ms res-a))
+                         (long (:delay-ms res-b)))]
+       {:decision decision
+        :delay-ms (long (max 0 delay-ms))
+        :state    [(:state res-a) (:state res-b)]
+        :out      [(:out res-a) (:out res-b)]}))))
 
 (defn union>
   "Combines two schedules into one that recurs as long as *either* schedule recurs.
@@ -202,47 +202,47 @@
    Outputs a pair `[out-a out-b]`."
   [sched-a sched-b]
   (make-schedule
-    (fn [] [(-initial-state sched-a) (-initial-state sched-b)])
-    (fn [[st-a st-b] now input]
-      (let [res-a    (-step sched-a st-a now input)
-            res-b    (-step sched-b st-b now input)
-            recur-a? (= (:decision res-a) :recur)
-            recur-b? (= (:decision res-b) :recur)
-            decision (if (or recur-a? recur-b?) :recur :halt)
-            delay-ms (cond
-                       (and recur-a? recur-b?) (min (long (:delay-ms res-a)) (long (:delay-ms res-b)))
-                       recur-a?                (long (:delay-ms res-a))
-                       recur-b?                (long (:delay-ms res-b))
-                       :else                   (min (long (:delay-ms res-a)) (long (:delay-ms res-b))))]
-        {:decision decision
-         :delay-ms (long (max 0 delay-ms))
-         :state    [(:state res-a) (:state res-b)]
-         :out      [(:out res-a) (:out res-b)]}))))
+   (fn [] [(-initial-state sched-a) (-initial-state sched-b)])
+   (fn [[st-a st-b] now input]
+     (let [res-a    (-step sched-a st-a now input)
+           res-b    (-step sched-b st-b now input)
+           recur-a? (= (:decision res-a) :recur)
+           recur-b? (= (:decision res-b) :recur)
+           decision (if (or recur-a? recur-b?) :recur :halt)
+           delay-ms (cond
+                      (and recur-a? recur-b?) (min (long (:delay-ms res-a)) (long (:delay-ms res-b)))
+                      recur-a?                (long (:delay-ms res-a))
+                      recur-b?                (long (:delay-ms res-b))
+                      :else                   (min (long (:delay-ms res-a)) (long (:delay-ms res-b))))]
+       {:decision decision
+        :delay-ms (long (max 0 delay-ms))
+        :state    [(:state res-a) (:state res-b)]
+        :out      [(:out res-a) (:out res-b)]}))))
 
 (defn and-then>
   "Sequentially composes two schedules. Runs `sched-a` to exhaustion, then seamlessly continues with `sched-b`."
   [sched-a sched-b]
   (make-schedule
-    (fn [] {:phase :a :state (-initial-state sched-a)})
-    (fn [{:keys [phase state]} now input]
-      (if (= phase :a)
-        (let [res-a (-step sched-a state now input)]
-          (if (= (:decision res-a) :recur)
-            {:decision :recur
-             :delay-ms (long (:delay-ms res-a))
-             :state    {:phase :a :state (:state res-a)}
-             :out      (:out res-a)}
-            (let [b-init (-initial-state sched-b)
-                  res-b  (-step sched-b b-init now input)]
-              {:decision (:decision res-b)
-               :delay-ms (long (:delay-ms res-b))
-               :state    {:phase :b :state (:state res-b)}
-               :out      (:out res-b)})))
-        (let [res-b (-step sched-b state now input)]
-          {:decision (:decision res-b)
-           :delay-ms (long (:delay-ms res-b))
-           :state    {:phase :b :state (:state res-b)}
-           :out      (:out res-b)})))))
+   (fn [] {:phase :a :state (-initial-state sched-a)})
+   (fn [{:keys [phase state]} now input]
+     (if (= phase :a)
+       (let [res-a (-step sched-a state now input)]
+         (if (= (:decision res-a) :recur)
+           {:decision :recur
+            :delay-ms (long (:delay-ms res-a))
+            :state    {:phase :a :state (:state res-a)}
+            :out      (:out res-a)}
+           (let [b-init (-initial-state sched-b)
+                 res-b  (-step sched-b b-init now input)]
+             {:decision (:decision res-b)
+              :delay-ms (long (:delay-ms res-b))
+              :state    {:phase :b :state (:state res-b)}
+              :out      (:out res-b)})))
+       (let [res-b (-step sched-b state now input)]
+         {:decision (:decision res-b)
+          :delay-ms (long (:delay-ms res-b))
+          :state    {:phase :b :state (:state res-b)}
+          :out      (:out res-b)})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Timing & Delay Modifiers
@@ -256,31 +256,31 @@
   ([schedule factor]
    (let [f (double factor)]
      (make-schedule
-       (fn [] (-initial-state schedule))
-       (fn [state now input]
-         (let [res      (-step schedule state now input)
-               delay-ms (long (:delay-ms res))]
-           (if (pos? delay-ms)
-             (let [min-f (max 0.0 (- 1.0 f))
-                   max-f (+ 1.0 f)
-                   rnd   (rand)
-                   mult  (+ min-f (* rnd (- max-f min-f)))
-                   jd    (long (* delay-ms mult))]
-               (assoc res :delay-ms (long (max 0 jd))))
-             res)))))))
+      (fn [] (-initial-state schedule))
+      (fn [state now input]
+        (let [res      (-step schedule state now input)
+              delay-ms (long (:delay-ms res))]
+          (if (pos? delay-ms)
+            (let [min-f (max 0.0 (- 1.0 f))
+                  max-f (+ 1.0 f)
+                  rnd   (rand)
+                  mult  (+ min-f (* rnd (- max-f min-f)))
+                  jd    (long (* delay-ms mult))]
+              (assoc res :delay-ms (long (max 0 jd))))
+            res)))))))
 
 (defn modify-delay>
   "Transforms the computed delay of a schedule using pure function `(f delay-ms state)` or `(f delay-ms)`."
   [schedule f]
   (make-schedule
-    (fn [] (-initial-state schedule))
-    (fn [state now input]
-      (let [res   (-step schedule state now input)
-            new-d (try
-                    (f (:delay-ms res) (:state res))
-                    (catch #?(:clj Throwable :cljs :default) _
-                      (f (:delay-ms res))))]
-        (assoc res :delay-ms (long (max 0 (or new-d 0))))))))
+   (fn [] (-initial-state schedule))
+   (fn [state now input]
+     (let [res   (-step schedule state now input)
+           new-d (try
+                   (f (:delay-ms res) (:state res))
+                   (catch #?(:clj Throwable :cljs :default) _
+                     (f (:delay-ms res))))]
+       (assoc res :delay-ms (long (max 0 (or new-d 0))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Condition & Filtering Combinators
@@ -290,49 +290,49 @@
   "Recurs only while `(pred input)` returns truthy."
   [schedule pred]
   (make-schedule
-    (fn [] (-initial-state schedule))
-    (fn [state now input]
-      (if (pred input)
-        (-step schedule state now input)
-        {:decision :halt
-         :delay-ms 0
-         :state    state
-         :out      nil}))))
+   (fn [] (-initial-state schedule))
+   (fn [state now input]
+     (if (pred input)
+       (-step schedule state now input)
+       {:decision :halt
+        :delay-ms 0
+        :state    state
+        :out      nil}))))
 
 (defn until-input>
   "Recurs until `(pred input)` returns truthy (halts when `(pred input)` is truthy)."
   [schedule pred]
   (make-schedule
-    (fn [] (-initial-state schedule))
-    (fn [state now input]
-      (if-not (pred input)
-        (-step schedule state now input)
-        {:decision :halt
-         :delay-ms 0
-         :state    state
-         :out      nil}))))
+   (fn [] (-initial-state schedule))
+   (fn [state now input]
+     (if-not (pred input)
+       (-step schedule state now input)
+       {:decision :halt
+        :delay-ms 0
+        :state    state
+        :out      nil}))))
 
 (defn while-output>
   "Recurs only while `(pred output)` of the step result returns truthy."
   [schedule pred]
   (make-schedule
-    (fn [] (-initial-state schedule))
-    (fn [state now input]
-      (let [res (-step schedule state now input)]
-        (if (and (= (:decision res) :recur) (pred (:out res)))
-          res
-          (assoc res :decision :halt))))))
+   (fn [] (-initial-state schedule))
+   (fn [state now input]
+     (let [res (-step schedule state now input)]
+       (if (and (= (:decision res) :recur) (pred (:out res)))
+         res
+         (assoc res :decision :halt))))))
 
 (defn until-output>
   "Recurs until `(pred output)` of the step result returns truthy."
   [schedule pred]
   (make-schedule
-    (fn [] (-initial-state schedule))
-    (fn [state now input]
-      (let [res (-step schedule state now input)]
-        (if (and (= (:decision res) :recur) (not (pred (:out res))))
-          res
-          (assoc res :decision :halt))))))
+   (fn [] (-initial-state schedule))
+   (fn [state now input]
+     (let [res (-step schedule state now input)]
+       (if (and (= (:decision res) :recur) (not (pred (:out res))))
+         res
+         (assoc res :decision :halt))))))
 
 (defn- extract-tag [input]
   (cond
@@ -360,27 +360,27 @@
   "Purely transforms the `:out` value produced by each step of the schedule with `(f out)`."
   [schedule f]
   (make-schedule
-    (fn [] (-initial-state schedule))
-    (fn [state now input]
-      (let [res (-step schedule state now input)]
-        (assoc res :out (f (:out res)))))))
+   (fn [] (-initial-state schedule))
+   (fn [state now input]
+     (let [res (-step schedule state now input)]
+       (assoc res :out (f (:out res)))))))
 
 (defn tap-step>
   "Executes a non-interfering side effect `(tap-fn {:decision d :delay-ms ms :input in :out out :state st})`
    after each schedule step."
   [schedule tap-fn]
   (make-schedule
-    (fn [] (-initial-state schedule))
-    (fn [state now input]
-      (let [res (-step schedule state now input)]
-        (try
-          (tap-fn {:decision (:decision res)
-                   :delay-ms (:delay-ms res)
-                   :input    input
-                   :out      (:out res)
-                   :state    (:state res)})
-          (catch #?(:clj Throwable :cljs :default) _ nil))
-        res))))
+   (fn [] (-initial-state schedule))
+   (fn [state now input]
+     (let [res (-step schedule state now input)]
+       (try
+         (tap-fn {:decision (:decision res)
+                  :delay-ms (:delay-ms res)
+                  :input    input
+                  :out      (:out res)
+                  :state    (:state res)})
+         (catch #?(:clj Throwable :cljs :default) _ nil))
+       res))))
 
 ;; ---------------------------------------------------------------------------
 ;; Runtime Timing Helper
@@ -612,8 +612,8 @@
                               tripped?  (>= new-count threshold)
                               next-st   (if tripped? :open :closed)
                               next-state (assoc curr :state next-st
-                                                     :failure-count (if tripped? new-count new-count)
-                                                     :tripped-at (when tripped? now))]
+                                                :failure-count (if tripped? new-count new-count)
+                                                :tripped-at (when tripped? now))]
                           (if (compare-and-set! breaker-atom curr next-state)
                             [old-st next-st]
                             (recur)))

@@ -292,9 +292,9 @@
    (metrics-layer> (make-metrics-registry)))
   ([registry]
    (fx-layer/make> :fx.observability/metrics-registry
-     (fx/succeed> (or registry (make-metrics-registry)))
-     (fn [reg]
-       (fx/try> (fn [] (reset-metrics! reg)))))))
+                   (fx/succeed> (or registry (make-metrics-registry)))
+                   (fn [reg]
+                     (fx/try> (fn [] (reset-metrics! reg)))))))
 
 (defn counter-inc>
   "Creates an effect that increments `counter-descriptor` by `n` (default 1).

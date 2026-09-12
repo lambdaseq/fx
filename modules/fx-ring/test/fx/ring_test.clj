@@ -60,10 +60,10 @@
 
   (testing "status>, header>, and content-type> modifiers"
     (let [res (fx/run-sync!
-                (-> (fx-resp/ok> "Payload")
-                    (fx-resp/status> 202)
-                    (fx-resp/header> "X-Custom" "Value-123")
-                    (fx-resp/content-type> "application/json")))]
+               (-> (fx-resp/ok> "Payload")
+                   (fx-resp/status> 202)
+                   (fx-resp/header> "X-Custom" "Value-123")
+                   (fx-resp/content-type> "application/json")))]
       (is (= 202 (:status res)))
       (is (= "Value-123" (get-in res [:headers "X-Custom"])))
       (is (= "application/json" (get-in res [:headers "Content-Type"])))
@@ -283,11 +283,11 @@
           ds (fx/run-sync! (fx-jdbc/get-datasource> db-spec))]
       ;; Initialize table
       (fx/run-sync!
-        (fx-jdbc/with-connection> ds
-          (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS items"])
-              (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE items (id INT PRIMARY KEY, name VARCHAR(255))"])))
-              (fx/mapcat> (fn [_] (sql/insert!> :items {:id 1 :name "Widget"})))
-              (fx/mapcat> (fn [_] (sql/insert!> :items {:id 2 :name "Gadget"}))))))
+       (fx-jdbc/with-connection> ds
+         (-> (fx-jdbc/execute!> ["DROP TABLE IF EXISTS items"])
+             (fx/mapcat> (fn [_] (fx-jdbc/execute!> ["CREATE TABLE items (id INT PRIMARY KEY, name VARCHAR(255))"])))
+             (fx/mapcat> (fn [_] (sql/insert!> :items {:id 1 :name "Widget"})))
+             (fx/mapcat> (fn [_] (sql/insert!> :items {:id 2 :name "Gadget"}))))))
 
       (let [handler (fn [req]
                       (let [item-id (Integer/parseInt (or (get-in req [:params :id]) "1"))]

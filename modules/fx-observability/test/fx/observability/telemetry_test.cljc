@@ -10,8 +10,8 @@
           sink (fn [e] (swap! events conj e))
           res (-> (telemetry/with-telemetry-sink> sink
                     (telemetry/tap-telemetry> :job/process {:job-id 123}
-                      (-> (fx/succeed> {:status :done})
-                          (fx/map> #(assoc % :extra true)))))
+                                              (-> (fx/succeed> {:status :done})
+                                                  (fx/map> #(assoc % :extra true)))))
                   (fx/run-sync!))]
       (is (= {:status :done :extra true} res))
       (is (= 1 (count @events)))
@@ -29,7 +29,7 @@
           sink (fn [e] (swap! events conj e))
           failure (-> (telemetry/with-telemetry-sink> sink
                         (telemetry/tap-telemetry> :job/process {:job-id 456}
-                          (fx/fail> :service/unavailable {:reason "timeout"})))
+                                                  (fx/fail> :service/unavailable {:reason "timeout"})))
                       (fx/run-sync!))]
       (is (fx/failure? failure))
       (is (= 1 (count @events)))
@@ -44,7 +44,7 @@
       (try
         (-> (telemetry/with-telemetry-sink> sink
               (telemetry/tap-telemetry> :job/critical
-                (fx/map> (fn [_] (throw (ex-info "Hard crash" {}))))))
+                                        (fx/map> (fn [_] (throw (ex-info "Hard crash" {}))))))
             (fx/run-sync!))
         (catch #?(:clj Exception :cljs :default) _ nil))
       (is (= 1 (count @events)))
@@ -72,8 +72,8 @@
     (let [events (atom [])
           sink (fn [e] (swap! events conj e))]
       (-> (fx-layer/provide-layer>
-            (telemetry/tap-telemetry-event> :layer/test {:msg "hi"})
-            (telemetry/telemetry-sink-layer> sink))
+           (telemetry/tap-telemetry-event> :layer/test {:msg "hi"})
+           (telemetry/telemetry-sink-layer> sink))
           (fx/run-sync!))
       (is (= 1 (count @events)))
       (is (= :layer/test (:event (first @events)))))))

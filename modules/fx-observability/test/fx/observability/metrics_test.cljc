@@ -43,13 +43,13 @@
       ;; Successful effect
       (-> (metrics/with-metrics-registry> reg
             (metrics/track-success-count> cnt
-              (fx/succeed> 42)))
+                                          (fx/succeed> 42)))
           (fx/run-sync!))
 
       ;; Failed effect
       (-> (metrics/with-metrics-registry> reg
             (metrics/track-success-count> cnt
-              (fx/fail> :error {:msg "boom"})))
+                                          (fx/fail> :error {:msg "boom"})))
           (fx/run-sync!))
 
       (let [snap (metrics/metrics-snapshot! reg)]
@@ -62,20 +62,20 @@
       ;; Successful effect
       (-> (metrics/with-metrics-registry> reg
             (metrics/track-failure-count> cnt
-              (fx/succeed> 42)))
+                                          (fx/succeed> 42)))
           (fx/run-sync!))
 
       ;; Failed effect
       (-> (metrics/with-metrics-registry> reg
             (metrics/track-failure-count> cnt
-              (fx/fail> :error {:msg "boom"})))
+                                          (fx/fail> :error {:msg "boom"})))
           (fx/run-sync!))
 
       ;; Thrown exception effect
       (try
         (-> (metrics/with-metrics-registry> reg
               (metrics/track-failure-count> cnt
-                (fx/map> (fn [_] (throw (ex-info "Error" {}))))))
+                                            (fx/map> (fn [_] (throw (ex-info "Error" {}))))))
             (fx/run-sync!))
         (catch #?(:clj Exception :cljs :default) _ nil))
 
@@ -88,8 +88,8 @@
           tmr (metrics/metric-timer "task.duration")]
       (-> (metrics/with-metrics-registry> reg
             (metrics/track-duration> tmr
-              (-> (fx/succeed> 10)
-                  (fx/sleep> 10))))
+                                     (-> (fx/succeed> 10)
+                                         (fx/sleep> 10))))
           (fx/run-sync!))
 
       (let [snap (metrics/metrics-snapshot! reg)
@@ -152,10 +152,10 @@
                  (metrics/counter-inc> cnt 2)
                  (metrics/gauge-set> gauge 15)
                  (as-> eff
-                   (->> eff
-                        (metrics/track-duration> tmr)
-                        (metrics/track-success-count> cnt)
-                        (metrics/track-failure-count> cnt)))
+                       (->> eff
+                            (metrics/track-duration> tmr)
+                            (metrics/track-success-count> cnt)
+                            (metrics/track-failure-count> cnt)))
                  (fx/run-sync!)))))))
 
 (deftest metrics-layer-test
@@ -163,12 +163,12 @@
     (let [reg (metrics/make-metrics-registry)
           cnt (metrics/metric-counter "layer.counter")]
       (-> (fx-layer/provide-layer>
-            (-> (metrics/counter-inc> cnt 5)
-                (fx/mapcat> (fn [_] (fx/succeed> (metrics/metrics-snapshot! reg)))))
-            (metrics/metrics-layer> reg))
+           (-> (metrics/counter-inc> cnt 5)
+               (fx/mapcat> (fn [_] (fx/succeed> (metrics/metrics-snapshot! reg)))))
+           (metrics/metrics-layer> reg))
           (fx/run-sync!)
           (as-> snap
-            (is (= 5 (get-in snap [:counters "layer.counter" :value])))))
+                (is (= 5 (get-in snap [:counters "layer.counter" :value])))))
       ;; On layer release, reset-metrics! was executed
       (let [snap (metrics/metrics-snapshot! reg)]
         (is (empty? (:counters snap)))))))

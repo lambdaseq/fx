@@ -110,9 +110,9 @@
     (let [logs (atom [])
           sink (fn [e] (swap! logs conj e))]
       (-> (fx-layer/provide-layer>
-            (-> (log/log-info> "From layer")
-                (log/log-debug> "Should be skipped"))
-            (log/logger-layer> {:logger sink :level :info :annotations {:env :test}}))
+           (-> (log/log-info> "From layer")
+               (log/log-debug> "Should be skipped"))
+           (log/logger-layer> {:logger sink :level :info :annotations {:env :test}}))
           (fx/run-sync!))
       (is (= 1 (count @logs)))
       (is (= "From layer" (:message (first @logs))))
